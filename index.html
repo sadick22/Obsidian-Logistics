@@ -261,226 +261,116 @@ This typically indicates that your device does not have a healthy Internet conne
 </script>
 <script>
 (function(){
-  'use strict';
+  function wait(cb){var t=setInterval(function(){var r=document.getElementById('root');if(r&&r.children.length>0){clearInterval(t);setTimeout(cb,900);}},300);}
 
-  // ------ Generate truly unique IDs ------
-  function genExpenseRef(){
-    // EXP-YYYYMMDD-randomHex
-    var now = new Date();
-    var d = now.getFullYear()
-      + String(now.getMonth()+1).padStart(2,'0')
-      + String(now.getDate()).padStart(2,'0');
-    var rand = Math.random().toString(36).substr(2,5).toUpperCase();
-    return 'EXP-' + d + '-' + rand;
+  function setVal(inp,val){
+    var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value');
+    if(s&&s.set)s.set.call(inp,val);else inp.value=val;
+    inp.dispatchEvent(new Event('input',{bubbles:true}));
+    inp.dispatchEvent(new Event('change',{bubbles:true}));
   }
 
-  function genInvoiceNum(){
-    // INV-YYYYMMDD-randomHex --- always unique
-    var now = new Date();
-    var d = now.getFullYear()
-      + String(now.getMonth()+1).padStart(2,'0')
-      + String(now.getDate()).padStart(2,'0');
-    var rand = Math.random().toString(36).substr(2,5).toUpperCase();
-    return 'INV-' + d + '-' + rand;
+  function uid(prefix){
+    var now=new Date();
+    var d=now.getFullYear()+('0'+(now.getMonth()+1)).slice(-2)+('0'+now.getDate()).slice(-2);
+    return prefix+'-'+d+'-'+Math.random().toString(36).substr(2,5).toUpperCase();
   }
 
-  function setReactValue(input, val){
-    var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value');
-    if(setter && setter.set){ setter.set.call(input, val); }
-    else { input.value = val; }
-    input.dispatchEvent(new Event('input',{bubbles:true}));
-    input.dispatchEvent(new Event('change',{bubbles:true}));
+  function goldStyle(inp){
+    inp.style.color='#c8a86e';inp.style.fontStyle='italic';
+    inp.title='Auto-generated. Click to edit.';
+    inp.addEventListener('focus',function(){inp.style.color='var(--text-primary)';inp.style.fontStyle='normal';inp.select();});
   }
 
-  function styleAutoField(input){
-    input.style.color = '#c8a86e';
-    input.style.fontStyle = 'italic';
-    input.title = 'Auto-generated. Click to edit.';
-    input.addEventListener('focus', function(){
-      input.style.color = 'var(--text-primary)';
-      input.style.fontStyle = 'normal';
-      input.select();
-    });
-  }
+  var patched={};
 
-  // ------ Patch forms ------
   function patchForms(){
-    var observer = new MutationObserver(function(){
+    // Expense ref number
+    var exp=document.querySelector('input[placeholder="e.g. INV-001"]');
+    if(exp&&!patched.exp){patched.exp=true;setVal(exp,uid('EXP'));goldStyle(exp);}
 
-      // Expense ref: placeholder "e.g. INV-001"
-      var expRef = document.querySelector('input[placeholder="e.g. INV-001"]');
-      if(expRef && !expRef.dataset.patched){
-        expRef.dataset.patched = 'true';
-        setReactValue(expRef, genExpenseRef());
-        styleAutoField(expRef);
-      }
+    // Invoice number
+    var inv=document.querySelector('input[placeholder="e.g. INV-2024-001"]');
+    if(inv&&!patched.inv){patched.inv=true;setVal(inv,uid('INV'));goldStyle(inv);}
 
-      // Invoice number: placeholder "e.g. INV-2024-001"
-      var invNum = document.querySelector('input[placeholder="e.g. INV-2024-001"]');
-      if(invNum && !invNum.dataset.patched){
-        invNum.dataset.patched = 'true';
-        setReactValue(invNum, genInvoiceNum());
-        styleAutoField(invNum);
-      }
-
-      // "Other" category free text
-      var selects = document.querySelectorAll('select');
-      selects.forEach(function(sel){
-        var hasOther = Array.from(sel.options).some(function(o){ return o.value==='Other'; });
-        if(!hasOther || sel.dataset.otherPatched) return;
-        sel.dataset.otherPatched = 'true';
-        var customInput = document.createElement('input');
-        customInput.type = 'text';
-        customInput.placeholder = 'Describe the expense category...';
-        customInput.style.cssText = 'display:none;margin-top:8px;width:100%;padding:9px 12px;border:1px solid var(--gold,#c8a86e);border-radius:8px;background:var(--surface);color:var(--text-primary);font-size:14px;font-family:inherit;outline:none;box-shadow:0 0 0 3px rgba(200,168,110,0.15);box-sizing:border-box;';
-        sel.parentNode.appendChild(customInput);
-        sel.addEventListener('change', function(){
-          if(sel.value==='Other'){ customInput.style.display='block'; setTimeout(function(){customInput.focus();},50); }
-          else { customInput.style.display='none'; customInput.value=''; }
-        });
-      });
-
-      // PDF buttons on invoice rows
-      addPdfButtons();
-
-      // Ref column in expense table
-      addRefColumn();
-    });
-
-    observer.observe(document.body, {childList:true, subtree:true});
-  }
-
-  // ------ Add REF # as first column in Expense Records table ------
-  function addRefColumn(){
-    // Find the expense table (has DATE, CATEGORY, DESCRIPTION headers)
-    var tables = document.querySelectorAll('table');
-    tables.forEach(function(table){
-      var headers = table.querySelectorAll('thead th');
-      if(!headers.length) return;
-      var headerTexts = Array.from(headers).map(function(h){ return (h.textContent||'').trim().toUpperCase(); });
-      // Only target expense table (has DATE and CATEGORY and DESCRIPTION)
-      if(headerTexts.indexOf('DATE')===-1 || headerTexts.indexOf('CATEGORY')===-1) return;
-      // Already patched?
-      if(headers[0].dataset.refAdded) return;
-      headers[0].dataset.refAdded = 'true';
-
-      // Add REF # header as first column
-      var refTh = document.createElement('th');
-      refTh.textContent = 'REF #';
-      refTh.style.cssText = 'font-size:12px;font-weight:500;color:var(--text-muted);padding:10px 14px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;';
-      headers[0].parentNode.insertBefore(refTh, headers[0]);
-
-      // Add ref cell to each body row
-      var rows = table.querySelectorAll('tbody tr');
-      rows.forEach(function(row){
-        if(row.dataset.refCellAdded) return;
-        row.dataset.refCellAdded = 'true';
-
-        // Try to read the ref number from localStorage by matching row data
-        var cells = row.querySelectorAll('td');
-        var rowDate = cells[0] ? (cells[0].textContent||'').trim() : '';
-        var rowDesc = cells[2] ? (cells[2].textContent||'').trim().split('\n')[0] : '';
-
-        var refNum = '---';
-        try {
-          var raw = localStorage.getItem('obsidian_logistics_data');
-          if(raw){
-            var d = JSON.parse(raw);
-            var payments = d.payments || [];
-            var match = payments.find(function(p){
-              var descMatch = (p.description||'').trim() === rowDesc;
-              var dateMatch = (p.date||'').replace(/-/g,'-') === rowDate;
-              return descMatch || dateMatch;
-            });
-            if(match && match.refNumber) refNum = match.refNumber;
-          }
-        } catch(e){}
-
-        var td = document.createElement('td');
-        td.style.cssText = 'padding:12px 14px;font-size:12px;font-weight:500;color:#c8a86e;white-space:nowrap;border-bottom:1px solid var(--border);font-family:monospace;';
-        td.textContent = refNum;
-        row.insertBefore(td, row.firstChild);
+    // "Other" category free text
+    document.querySelectorAll('select').forEach(function(sel){
+      if(sel._op)return;
+      var hasOther=Array.from(sel.options).some(function(o){return o.value==='Other';});
+      if(!hasOther)return;
+      sel._op=true;
+      var ci=document.createElement('input');
+      ci.type='text';ci.placeholder='Describe the expense category...';
+      ci.style.cssText='display:none;margin-top:8px;width:100%;padding:9px 12px;border:1px solid #c8a86e;border-radius:8px;background:var(--surface);color:var(--text-primary);font-size:14px;font-family:inherit;outline:none;box-sizing:border-box;';
+      sel.parentNode.appendChild(ci);
+      sel.addEventListener('change',function(){
+        ci.style.display=sel.value==='Other'?'block':'none';
+        if(sel.value==='Other')setTimeout(function(){ci.focus();},50);
+        else ci.value='';
       });
     });
   }
 
-  // ------ PDF buttons on invoice rows ------
-  function getLogoSVG(){
-    return '<svg width="40" height="40" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg"><polygon points="18,2 32,10 32,26 18,34 4,26 4,10" fill="#1c1c1e" stroke="#c8a86e" stroke-width="1.5"/><polygon points="18,7 28,13 28,23 18,29 8,23 8,13" fill="#2a2a2e"/><polygon points="18,7 28,13 18,18" fill="#c8a86e" opacity="0.9"/><polygon points="18,18 28,13 28,23" fill="#a08050" opacity="0.8"/><polygon points="18,18 28,23 18,29" fill="#c8a86e" opacity="0.7"/><polygon points="18,18 18,29 8,23" fill="#8a6840" opacity="0.6"/><polygon points="18,18 8,23 8,13" fill="#c8a86e" opacity="0.5"/><polygon points="18,7 18,18 8,13" fill="#e0c080" opacity="0.8"/></svg>';
+  // PDF invoice download
+  function logoSVG(){return '<svg width="36" height="36" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg"><polygon points="18,2 32,10 32,26 18,34 4,26 4,10" fill="#1c1c1e" stroke="#c8a86e" stroke-width="1.5"/><polygon points="18,7 28,13 28,23 18,29 8,23 8,13" fill="#2a2a2e"/><polygon points="18,7 28,13 18,18" fill="#c8a86e" opacity="0.9"/><polygon points="18,18 28,23 18,29" fill="#c8a86e" opacity="0.7"/><polygon points="18,7 18,18 8,13" fill="#e0c080" opacity="0.8"/></svg>';}
+
+  function addPdfBtn(row,cells){
+    if(row._pdf)return;row._pdf=true;
+    var last=cells[cells.length-1];
+    var btn=document.createElement('button');
+    btn.innerHTML='PDF';
+    btn.style.cssText='margin-top:4px;display:block;width:100%;padding:3px 8px;border:1px solid #c8a86e;border-radius:6px;background:transparent;color:#c8a86e;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;';
+    btn.onclick=function(){doPDF(cells);};
+    last.appendChild(btn);
   }
 
-  function addPdfButtons(){
-    var tables = document.querySelectorAll('table');
-    tables.forEach(function(table){
-      var headers = table.querySelectorAll('thead th');
-      var headerTexts = Array.from(headers).map(function(h){ return (h.textContent||'').trim().toUpperCase(); });
-      // Only invoice table
-      if(headerTexts.indexOf('INVOICE #')===-1 && headerTexts.indexOf('TYPE')===-1) return;
+  function doPDF(cells){
+    var g=function(i){return cells[i]?(cells[i].textContent||'').trim():'';};
+    var num=g(0),type=g(1),client=g(2),date=g(3),due=g(4),amt=g(5),stat=g(6);
+    var items=[],notes='';
+    try{
+      var d=JSON.parse(localStorage.getItem('obsidian_logistics_data')||'{}');
+      var inv=(d.invoices||[]).find(function(x){return x.invoiceNumber===num;});
+      if(inv){client=inv.client||client;date=inv.invoiceDate||date;due=inv.dueDate||due;amt='GHS '+(inv.total||0).toLocaleString();notes=inv.notes||'';items=inv.items||[];}
+    }catch(e){}
+    var sc=stat==='Paid'?'#10b981':stat==='Overdue'?'#ef4444':'#f59e0b';
+    var rows=items.length?items.map(function(it,i){
+      var sub=(parseFloat(it.qty)||1)*(parseFloat(it.price)||0);
+      return '<tr style="border-bottom:1px solid #eee"><td style="padding:8px">'+(i+1)+'</td><td style="padding:8px">'+(it.description||'')+'</td><td style="padding:8px;text-align:center">'+(it.qty||1)+'</td><td style="padding:8px;text-align:right">GHS '+(parseFloat(it.price)||0).toLocaleString()+'</td><td style="padding:8px;text-align:right;font-weight:600">GHS '+sub.toLocaleString()+'</td></tr>';
+    }).join(''):'<tr><td colspan="5" style="padding:16px;text-align:center;color:#999;font-size:13px">Logistics / Transportation Services</td></tr>';
 
-      var rows = table.querySelectorAll('tbody tr');
-      rows.forEach(function(row){
-        if(row.dataset.pdfAdded) return;
-        var cells = row.querySelectorAll('td');
-        var hasInv = Array.from(cells).some(function(c){ return (c.textContent||'').indexOf('INV-')>-1; });
-        if(!hasInv) return;
-        row.dataset.pdfAdded = 'true';
-        var lastCell = cells[cells.length-1];
-        var pdfBtn = document.createElement('button');
-        pdfBtn.innerHTML = '&#128196; PDF';
-        pdfBtn.style.cssText = 'margin-top:4px;display:block;padding:4px 10px;border:1px solid #c8a86e;border-radius:6px;background:transparent;color:#c8a86e;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;width:100%;';
-        pdfBtn.addEventListener('mouseenter',function(){ pdfBtn.style.background='rgba(200,168,110,0.12)'; });
-        pdfBtn.addEventListener('mouseleave',function(){ pdfBtn.style.background='transparent'; });
-        pdfBtn.addEventListener('click',function(){ generatePDF(row, cells); });
-        lastCell.appendChild(pdfBtn);
+    var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+num+'</title>'
+    +'<style>body{font-family:Georgia,serif;margin:0;color:#1a1a2e}div.p{max-width:760px;margin:0 auto;padding:48px}.h{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1c1c1e;padding-bottom:24px;margin-bottom:36px}.logo{display:flex;align-items:center;gap:12px}.cn{font-size:20px;font-weight:700;letter-spacing:1px}.cs{font-size:10px;color:#c8a86e;letter-spacing:3px;text-transform:uppercase}.ir{text-align:right}.ir h1{font-size:34px;font-weight:700;margin:0;letter-spacing:2px}.in{font-size:13px;color:#c8a86e;font-weight:600;margin-top:3px}.sb{display:inline-block;padding:3px 12px;border-radius:99px;font-size:12px;font-weight:600;margin-top:6px;background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44}.meta{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-bottom:32px}.mb h3{font-size:10px;color:#9ca3af;letter-spacing:2px;text-transform:uppercase;margin:0 0 6px}.mb p{font-size:13px;margin:3px 0}table{width:100%;border-collapse:collapse;margin-bottom:20px}thead th{background:#1c1c1e;color:#fff;padding:10px 8px;font-size:11px;letter-spacing:1px;text-transform:uppercase;text-align:left}thead th:last-child,thead th:nth-child(4){text-align:right}thead th:nth-child(3){text-align:center}tbody tr:nth-child(even){background:#fafafa}.tb{display:flex;justify-content:flex-end;margin-bottom:28px}.ti{background:#1c1c1e;color:#fff;padding:18px 24px;border-radius:10px}.tl{font-size:10px;color:#c8a86e;letter-spacing:2px;text-transform:uppercase}.ta{font-size:26px;font-weight:700;margin-top:3px}.ft{border-top:1px solid #e8eaed;padding-top:16px;display:flex;justify-content:space-between}.ft p{font-size:11px;color:#9ca3af;margin:2px 0}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>'
+    +'</head><body><div class="p"><div class="h"><div class="logo">'+logoSVG()+'<div><div class="cn">Obsidian Logistics Co.</div><div class="cs">Moving Trade Across Borders</div></div></div><div class="ir"><h1>INVOICE</h1><div class="in">'+num+'</div><div><span class="sb">'+stat+'</span></div></div></div>'
+    +'<div class="meta"><div class="mb"><h3>Bill To</h3><p style="font-weight:600;font-size:15px">'+client+'</p></div><div class="mb"><h3>Details</h3><p><b>Type:</b> '+type+'</p><p><b>Date:</b> '+date+'</p><p><b>Due:</b> '+due+'</p></div></div>'
+    +'<table><thead><tr><th>#</th><th>Description</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead><tbody>'+rows+'</tbody></table>'
+    +'<div class="tb"><div class="ti"><div class="tl">Total Amount</div><div class="ta">'+amt+'</div></div></div>'
+    +(notes?'<div style="background:#fafafa;border-left:4px solid #c8a86e;padding:12px 16px;border-radius:0 8px 8px 0;font-size:13px;color:#6b7280;margin-bottom:28px"><b>Notes:</b> '+notes+'</div>':'')
+    +'<div class="ft"><div><p style="color:#c8a86e;font-weight:600">Obsidian Logistics Co.</p><p>Ghana, West Africa</p></div><div style="text-align:right"><p>Thank you for your business!</p><p style="color:#c8a86e;font-weight:600">obsidian-logistics.vercel.app</p></div></div>'
+    +'</div><scr'+'ipt>window.onload=function(){window.print();}</scr'+'ipt></body></html>';
+    var w=window.open('','_blank','width=880,height=680');
+    if(w){w.document.write(html);w.document.close();}
+  }
+
+  // Scan invoice table every 2s for new rows needing PDF buttons
+  function scanInvoices(){
+    document.querySelectorAll('table').forEach(function(t){
+      var ths=Array.from(t.querySelectorAll('thead th')).map(function(h){return(h.textContent||'').trim().toUpperCase();});
+      if(ths.indexOf('INVOICE #')===-1&&ths.indexOf('TYPE')===-1)return;
+      t.querySelectorAll('tbody tr').forEach(function(row){
+        var cells=row.querySelectorAll('td');
+        var hasInv=Array.from(cells).some(function(c){return(c.textContent||'').indexOf('INV-')>-1;});
+        if(hasInv)addPdfBtn(row,cells);
       });
     });
   }
 
-  function generatePDF(row, cells){
-    var getText = function(i){ return cells[i] ? (cells[i].textContent||'').trim() : ''; };
-    var invNum  = getText(0) || 'INV-001';
-    var invType = getText(1) || 'Customer Invoice';
-    var client  = getText(2) || '---';
-    var invDate = getText(3) || '---';
-    var dueDate = getText(4) || '---';
-    var amount  = getText(5) || 'GHS 0';
-    var status  = getText(6) || 'Pending';
-    var lineItems = []; var notes = '';
-    try {
-      var raw = localStorage.getItem('obsidian_logistics_data');
-      if(raw){
-        var d = JSON.parse(raw);
-        var inv = (d.invoices||[]).find(function(i){ return i.invoiceNumber===invNum||i.id===invNum; });
-        if(inv){ client=inv.client||client; invDate=inv.invoiceDate||invDate; dueDate=inv.dueDate||dueDate; amount='GHS '+(inv.total||0).toLocaleString(); notes=inv.notes||''; lineItems=inv.items||[]; }
-      }
-    } catch(e){}
-    var sc = status==='Paid'?'#10b981':status==='Overdue'?'#ef4444':'#f59e0b';
-    var itemsHTML = lineItems.length ? lineItems.map(function(item,idx){
-      var sub=(parseFloat(item.qty)||1)*(parseFloat(item.price)||0);
-      return '<tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:10px 8px;font-size:13px;color:#374151;">'+(idx+1)+'</td><td style="padding:10px 8px;font-size:13px;color:#374151;">'+(item.description||'Service')+'</td><td style="padding:10px 8px;font-size:13px;text-align:center;">'+(item.qty||1)+'</td><td style="padding:10px 8px;font-size:13px;text-align:right;">GHS '+(parseFloat(item.price)||0).toLocaleString()+'</td><td style="padding:10px 8px;font-weight:600;text-align:right;">GHS '+sub.toLocaleString()+'</td></tr>';
-    }).join('') : '<tr><td colspan="5" style="padding:16px;text-align:center;color:#9ca3af;font-size:13px;">Transportation / Logistics Services</td></tr>';
-
-    var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+invNum+'</title>'
-      +'<style>body{font-family:Georgia,serif;margin:0;padding:0;background:#fff;color:#1a1a2e;}.page{max-width:780px;margin:0 auto;padding:48px;}.hdr{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:40px;border-bottom:3px solid #1c1c1e;padding-bottom:24px;}.logo{display:flex;align-items:center;gap:14px;}.cn{font-family:Georgia,serif;font-size:22px;font-weight:700;letter-spacing:1px;}.cs{font-size:11px;color:#c8a86e;letter-spacing:3px;text-transform:uppercase;margin-top:2px;}.it{text-align:right;}.it h1{font-size:36px;font-weight:700;margin:0;letter-spacing:2px;}.in{font-size:14px;color:#c8a86e;font-weight:600;margin-top:4px;}.sb{display:inline-block;padding:4px 14px;border-radius:99px;font-size:12px;font-weight:600;margin-top:8px;background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44;}.meta{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-bottom:36px;}.mb h3{font-size:11px;color:#9ca3af;letter-spacing:2px;text-transform:uppercase;margin:0 0 8px;}.mb p{font-size:14px;margin:3px 0;}table{width:100%;border-collapse:collapse;margin-bottom:24px;}thead th{background:#1c1c1e;color:#fff;padding:12px 8px;font-size:12px;letter-spacing:1px;text-transform:uppercase;text-align:left;}thead th:last-child,thead th:nth-child(4){text-align:right;}thead th:nth-child(3){text-align:center;}tbody tr:nth-child(even){background:#fafafa;}.tot{display:flex;justify-content:flex-end;margin-bottom:36px;}.tb{background:#1c1c1e;color:#fff;padding:20px 28px;border-radius:10px;min-width:220px;}.tl{font-size:11px;color:#c8a86e;letter-spacing:2px;text-transform:uppercase;}.ta{font-size:28px;font-weight:700;margin-top:4px;}.nt{background:#fafafa;border-left:4px solid #c8a86e;padding:14px 18px;border-radius:0 8px 8px 0;font-size:13px;color:#6b7280;margin-bottom:36px;}.ft{border-top:1px solid #e8eaed;padding-top:20px;display:flex;justify-content:space-between;}.ft p{font-size:11px;color:#9ca3af;margin:2px 0;}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style></head><body>'
-      +'<div class="page"><div class="hdr"><div class="logo">'+getLogoSVG()+'<div><div class="cn">Obsidian Logistics Co.</div><div class="cs">Moving Trade Across Borders</div></div></div><div class="it"><h1>INVOICE</h1><div class="in">'+invNum+'</div><div><span class="sb">'+status+'</span></div></div></div>'
-      +'<div class="meta"><div class="mb"><h3>Bill To</h3><p style="font-weight:600;font-size:16px;">'+client+'</p></div><div class="mb"><h3>Invoice Details</h3><p><strong>Type:</strong> '+invType+'</p><p><strong>Invoice Date:</strong> '+invDate+'</p><p><strong>Due Date:</strong> '+dueDate+'</p></div></div>'
-      +'<table><thead><tr><th>#</th><th>Description</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead><tbody>'+itemsHTML+'</tbody></table>'
-      +'<div class="tot"><div class="tb"><div class="tl">Total Amount</div><div class="ta">'+amount+'</div></div></div>'
-      +(notes?'<div class="nt"><strong>Notes / Payment Terms:</strong><br>'+notes+'</div>':'')
-      +'<div class="ft"><div><p style="color:#c8a86e;font-weight:600;">Obsidian Logistics Co.</p><p>Moving Trade Across Borders</p><p>Ghana, West Africa</p></div><div style="text-align:right;"><p>Thank you for your business!</p><p style="color:#c8a86e;font-weight:600;">obsidian-logistics.vercel.app</p></div></div>'
-      +'</div><scr'+'ipt>window.onload=function(){window.print();}</scr'+'ipt></body></html>';
-
-    var win=window.open('','_blank','width=900,height=700');
-    if(win){ win.document.write(html); win.document.close(); }
-  }
-
-  function waitForApp(cb){
-    var t=setInterval(function(){ var r=document.getElementById('root'); if(r&&r.children.length>0){clearInterval(t);setTimeout(cb,800);} },300);
-  }
-
-  waitForApp(function(){
+  // Run once on load, then observe for form opens
+  wait(function(){
+    var ob=new MutationObserver(function(){patchForms();scanInvoices();});
+    ob.observe(document.body,{childList:true,subtree:true});
     patchForms();
-    setInterval(function(){ addPdfButtons(); addRefColumn(); }, 1500);
+    scanInvoices();
   });
 })();
 </script>
