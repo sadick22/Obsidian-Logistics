@@ -339,12 +339,16 @@ This typically indicates that your device does not have a healthy Internet conne
       // Add ref cell to each body row
       table.querySelectorAll('tbody tr').forEach(function(row){
         if(row._refAdded)return;
-        row._refAdded=true;
         var cells=row.querySelectorAll('td');
         if(!cells.length)return;
 
-        // Try to match by description or date
-        var rowDate=(cells[0]?cells[0].textContent:'').trim();
+        // Check if first cell already looks like a REF (EXP- or --) to avoid double injection
+        var firstCellText=(cells[0]?cells[0].textContent:'').trim();
+        if(firstCellText.indexOf('EXP-')===0||firstCellText==='--') return;
+
+        row._refAdded=true;
+
+        // Match by description (cells[2]) and amount (cells[4])
         var rowDesc=(cells[2]?cells[2].textContent:'').trim().split('\n')[0].trim();
         var rowAmt=(cells[4]?cells[4].textContent:'').replace(/[^0-9]/g,'');
 
@@ -352,7 +356,7 @@ This typically indicates that your device does not have a healthy Internet conne
         var match=payments.find(function(p){
           var descOk=(p.description||'').trim()===rowDesc;
           var amtOk=String(p.amount||'').replace(/[^0-9]/g,'')===rowAmt;
-          return descOk||amtOk;
+          return descOk&&amtOk;
         });
         if(match&&match.refNumber) refNum=match.refNumber;
 
