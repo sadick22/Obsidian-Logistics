@@ -345,3 +345,237 @@ This typically indicates that your device does not have a healthy Internet conne
   waitForApp(patchExpenseForm);
 })();
 </script>
+<script>
+(function(){
+  'use strict';
+
+  // ── Patch Invoice Number auto-gen ──
+  function patchInvoiceForm(){
+    var observer = new MutationObserver(function(){
+
+      // Invoice form: placeholder "e.g. INV-2024-001"
+      var invInput = document.querySelector('input[placeholder="e.g. INV-2024-001"]');
+      if(invInput && !invInput.dataset.autoInv){
+        invInput.dataset.autoInv = 'true';
+        var count = 0;
+        try {
+          var raw = localStorage.getItem('obsidian_logistics_data');
+          if(raw){ var d = JSON.parse(raw); count = (d.invoices||[]).length; }
+        } catch(e){}
+        var now = new Date();
+        var yy = now.getFullYear();
+        var mm = String(now.getMonth()+1).padStart(2,'0');
+        var num = String(count + 1).padStart(3,'0');
+        var generated = 'INV-' + yy + '-' + mm + '-' + num;
+        var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value');
+        if(setter && setter.set){
+          setter.set.call(invInput, generated);
+          invInput.dispatchEvent(new Event('input',{bubbles:true}));
+          invInput.dispatchEvent(new Event('change',{bubbles:true}));
+        } else { invInput.value = generated; }
+        invInput.style.color = '#c8a86e';
+        invInput.style.fontStyle = 'italic';
+        invInput.title = 'Auto-generated. Click to edit.';
+        invInput.addEventListener('focus', function(){
+          invInput.style.color = 'var(--text-primary)';
+          invInput.style.fontStyle = 'normal';
+          invInput.select();
+        });
+      }
+
+      // ── Add Download PDF button next to Save Invoice ──
+      patchSaveInvoiceBtn();
+    });
+    observer.observe(document.body, {childList:true, subtree:true});
+  }
+
+  function patchSaveInvoiceBtn(){
+    var saveBtn = document.querySelector('button.btn-gold');
+    if(!saveBtn || saveBtn.dataset.pdfPatched) return;
+    var txt = saveBtn.textContent || '';
+    if(txt.indexOf('Save Invoice') === -1 && txt.indexOf('Invoice') === -1) return;
+    saveBtn.dataset.pdfPatched = 'true';
+
+    // Override the save button to also attach PDF download after save
+    saveBtn.addEventListener('click', function(){
+      // Wait for invoice to be saved then inject download button on the list
+      setTimeout(attachPdfButtons, 1200);
+    });
+  }
+
+  function getLogoSVG(){
+    return '<svg width="36" height="36" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg"><polygon points="18,2 32,10 32,26 18,34 4,26 4,10" fill="#1c1c1e" stroke="#c8a86e" stroke-width="1.5"/><polygon points="18,7 28,13 28,23 18,29 8,23 8,13" fill="#2a2a2e"/><polygon points="18,7 28,13 18,18" fill="#c8a86e" opacity="0.9"/><polygon points="18,18 28,13 28,23" fill="#a08050" opacity="0.8"/><polygon points="18,18 28,23 18,29" fill="#c8a86e" opacity="0.7"/><polygon points="18,18 18,29 8,23" fill="#8a6840" opacity="0.6"/><polygon points="18,18 8,23 8,13" fill="#c8a86e" opacity="0.5"/><polygon points="18,7 18,18 8,13" fill="#e0c080" opacity="0.8"/></svg>';
+  }
+
+  function attachPdfButtons(){
+    // Find all invoice rows in the table that don't have a PDF button yet
+    var rows = document.querySelectorAll('tbody tr');
+    rows.forEach(function(row){
+      if(row.dataset.pdfAdded) return;
+      var cells = row.querySelectorAll('td');
+      if(cells.length < 3) return;
+      // Check if this looks like an invoice row
+      var hasInvNum = false;
+      cells.forEach(function(c){ if((c.textContent||'').indexOf('INV-') > -1) hasInvNum = true; });
+      if(!hasInvNum) return;
+      row.dataset.pdfAdded = 'true';
+
+      // Find actions cell (last td)
+      var lastCell = cells[cells.length - 1];
+      var pdfBtn = document.createElement('button');
+      pdfBtn.innerHTML = '&#128196; PDF';
+      pdfBtn.title = 'Download Invoice as PDF';
+      pdfBtn.style.cssText = 'margin-left:6px;padding:4px 10px;border:1px solid #c8a86e;border-radius:6px;background:transparent;color:#c8a86e;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;';
+      pdfBtn.addEventListener('mouseenter', function(){ pdfBtn.style.background='rgba(200,168,110,0.1)'; });
+      pdfBtn.addEventListener('mouseleave', function(){ pdfBtn.style.background='transparent'; });
+      pdfBtn.addEventListener('click', function(){ generateInvoicePDF(row, cells); });
+      lastCell.appendChild(pdfBtn);
+    });
+  }
+
+  function generateInvoicePDF(row, cells){
+    var getText = function(i){ return cells[i] ? (cells[i].textContent||'').trim() : ''; };
+
+    // Extract invoice data from the row
+    var invNum    = getText(0) || 'INV-001';
+    var invType   = getText(1) || 'Customer Invoice';
+    var client    = getText(2) || '—';
+    var invDate   = getText(3) || new Date().toLocaleDateString();
+    var dueDate   = getText(4) || '—';
+    var amount    = getText(5) || 'GHS 0';
+    var status    = getText(6) || 'Pending';
+
+    // Try to get more detail from localStorage
+    var lineItems = [];
+    var notes = '';
+    try {
+      var raw = localStorage.getItem('obsidian_logistics_data');
+      if(raw){
+        var d = JSON.parse(raw);
+        var inv = (d.invoices||[]).find(function(i){ return i.invoiceNumber === invNum || i.id === invNum; });
+        if(inv){
+          client   = inv.client    || client;
+          invDate  = inv.invoiceDate || invDate;
+          dueDate  = inv.dueDate   || dueDate;
+          amount   = 'GHS ' + (inv.total||0).toLocaleString();
+          notes    = inv.notes     || '';
+          lineItems = inv.items    || [];
+        }
+      }
+    } catch(e){}
+
+    var statusColor = status === 'Paid' ? '#10b981' : status === 'Overdue' ? '#ef4444' : '#f59e0b';
+
+    var itemsHTML = '';
+    if(lineItems.length > 0){
+      itemsHTML = lineItems.map(function(item, idx){
+        var subtotal = (parseFloat(item.qty)||1) * (parseFloat(item.price)||0);
+        return '<tr style="border-bottom:1px solid #f0f0f0;">'
+          + '<td style="padding:10px 8px;font-size:13px;color:#374151;">' + (idx+1) + '</td>'
+          + '<td style="padding:10px 8px;font-size:13px;color:#374151;">' + (item.description||'Service') + '</td>'
+          + '<td style="padding:10px 8px;font-size:13px;color:#374151;text-align:center;">' + (item.qty||1) + '</td>'
+          + '<td style="padding:10px 8px;font-size:13px;color:#374151;text-align:right;">GHS ' + (parseFloat(item.price)||0).toLocaleString() + '</td>'
+          + '<td style="padding:10px 8px;font-size:13px;font-weight:600;color:#1a1a2e;text-align:right;">GHS ' + subtotal.toLocaleString() + '</td>'
+          + '</tr>';
+      }).join('');
+    } else {
+      itemsHTML = '<tr><td colspan="5" style="padding:16px 8px;text-align:center;color:#9ca3af;font-size:13px;">Transportation / Logistics Services</td></tr>';
+    }
+
+    var html = '<!DOCTYPE html><html><head><meta charset="utf-8">'
+      + '<title>Invoice ' + invNum + '</title>'
+      + '<style>'
+      + 'body{font-family:Georgia,serif;margin:0;padding:0;background:#fff;color:#1a1a2e;}'
+      + '.page{max-width:780px;margin:0 auto;padding:48px;}'
+      + '.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:40px;border-bottom:3px solid #1c1c1e;padding-bottom:24px;}'
+      + '.logo-area{display:flex;align-items:center;gap:14px;}'
+      + '.company-name{font-family:Georgia,serif;font-size:22px;font-weight:700;color:#1a1a2e;letter-spacing:1px;}'
+      + '.company-sub{font-size:11px;color:#c8a86e;letter-spacing:3px;text-transform:uppercase;margin-top:2px;}'
+      + '.inv-title{text-align:right;}'
+      + '.inv-title h1{font-size:36px;font-weight:700;color:#1a1a2e;margin:0;letter-spacing:2px;}'
+      + '.inv-title .inv-num{font-size:14px;color:#c8a86e;font-weight:600;margin-top:4px;}'
+      + '.status-badge{display:inline-block;padding:4px 14px;border-radius:99px;font-size:12px;font-weight:600;margin-top:8px;background:' + statusColor + '22;color:' + statusColor + ';border:1px solid ' + statusColor + '44;}'
+      + '.meta{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-bottom:36px;}'
+      + '.meta-block h3{font-size:11px;color:#9ca3af;letter-spacing:2px;text-transform:uppercase;margin:0 0 8px;}'
+      + '.meta-block p{font-size:14px;color:#1a1a2e;margin:3px 0;}'
+      + 'table{width:100%;border-collapse:collapse;margin-bottom:24px;}'
+      + 'thead th{background:#1c1c1e;color:#fff;padding:12px 8px;font-size:12px;letter-spacing:1px;text-transform:uppercase;text-align:left;}'
+      + 'thead th:last-child,thead th:nth-child(4){text-align:right;}'
+      + 'thead th:nth-child(3){text-align:center;}'
+      + 'tbody tr:nth-child(even){background:#fafafa;}'
+      + '.total-section{display:flex;justify-content:flex-end;margin-bottom:36px;}'
+      + '.total-box{background:#1c1c1e;color:#fff;padding:20px 28px;border-radius:10px;min-width:220px;}'
+      + '.total-box .label{font-size:11px;color:#c8a86e;letter-spacing:2px;text-transform:uppercase;}'
+      + '.total-box .amount{font-size:28px;font-weight:700;margin-top:4px;}'
+      + '.notes{background:#fafafa;border-left:4px solid #c8a86e;padding:14px 18px;border-radius:0 8px 8px 0;font-size:13px;color:#6b7280;margin-bottom:36px;}'
+      + '.footer{border-top:1px solid #e8eaed;padding-top:20px;display:flex;justify-content:space-between;align-items:center;}'
+      + '.footer p{font-size:11px;color:#9ca3af;margin:2px 0;}'
+      + '.gold{color:#c8a86e;}'
+      + '@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}'
+      + '</style></head><body>'
+      + '<div class="page">'
+      // Header
+      + '<div class="header">'
+      + '<div class="logo-area">'
+      + getLogoSVG()
+      + '<div><div class="company-name">Obsidian Logistics Co.</div><div class="company-sub">Moving Trade Across Borders</div></div>'
+      + '</div>'
+      + '<div class="inv-title">'
+      + '<h1>INVOICE</h1>'
+      + '<div class="inv-num">' + invNum + '</div>'
+      + '<div><span class="status-badge">' + status + '</span></div>'
+      + '</div>'
+      + '</div>'
+      // Meta
+      + '<div class="meta">'
+      + '<div class="meta-block"><h3>Bill To</h3><p style="font-weight:600;font-size:16px;">' + client + '</p></div>'
+      + '<div class="meta-block"><h3>Invoice Details</h3>'
+      + '<p><strong>Type:</strong> ' + invType + '</p>'
+      + '<p><strong>Invoice Date:</strong> ' + invDate + '</p>'
+      + '<p><strong>Due Date:</strong> ' + dueDate + '</p>'
+      + '</div>'
+      + '</div>'
+      // Items table
+      + '<table>'
+      + '<thead><tr><th>#</th><th>Description</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead>'
+      + '<tbody>' + itemsHTML + '</tbody>'
+      + '</table>'
+      // Total
+      + '<div class="total-section"><div class="total-box"><div class="label">Total Amount</div><div class="amount">' + amount + '</div></div></div>'
+      // Notes
+      + (notes ? '<div class="notes"><strong>Notes / Payment Terms:</strong><br>' + notes + '</div>' : '')
+      // Footer
+      + '<div class="footer">'
+      + '<div><p class="gold" style="font-weight:600;">Obsidian Logistics Co.</p><p>Moving Trade Across Borders</p><p>Ghana, West Africa</p></div>'
+      + '<div style="text-align:right;"><p>Thank you for your business!</p><p style="color:#c8a86e;font-weight:600;">obsidian-logistics.vercel.app</p></div>'
+      + '</div>'
+      + '</div>'
+      + '<scr'+'ipt>window.onload=function(){window.print();}</scr'+'ipt>'
+      + '</body></html>';
+
+    var win = window.open('','_blank','width=900,height=700');
+    if(win){
+      win.document.write(html);
+      win.document.close();
+    }
+  }
+
+  // Keep checking for new invoice rows periodically
+  function keepWatching(){
+    setInterval(attachPdfButtons, 2000);
+  }
+
+  function waitForApp(cb){
+    var t = setInterval(function(){
+      var r = document.getElementById('root');
+      if(r && r.children.length > 0){ clearInterval(t); setTimeout(cb, 800); }
+    }, 300);
+  }
+
+  waitForApp(function(){
+    patchInvoiceForm();
+    keepWatching();
+  });
+
+})();
+</script>
