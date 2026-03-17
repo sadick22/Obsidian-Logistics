@@ -55,3 +55,207 @@ This typically indicates that your device does not have a healthy Internet conne
   waitForApp(addMobileMenu);
 })();
 </script>
+<script>
+(function(){
+  'use strict';
+
+  function waitForApp(cb){
+    var t=setInterval(function(){
+      var r=document.getElementById('root');
+      if(r&&r.children.length>0){clearInterval(t);setTimeout(cb,1000);}
+    },300);
+  }
+
+  // ============================================================
+  // NOTIFICATIONS BELL
+  // ============================================================
+  function addNotifications(){
+    // Find the bell button in topbar and replace with smart one
+    var topbar=document.querySelector('header');
+    if(!topbar) return;
+
+    // Create notification button
+    var wrap=document.createElement('div');
+    wrap.style.cssText='position:relative;display:inline-flex;';
+
+    var btn=document.createElement('button');
+    btn.id='notif-btn';
+    btn.style.cssText='width:36px;height:36px;border:1px solid var(--border);border-radius:8px;background:var(--surface);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-secondary);position:relative;font-size:15px;';
+    btn.innerHTML='&#128276;';
+
+    var badge=document.createElement('span');
+    badge.id='notif-badge';
+    badge.style.cssText='position:absolute;top:-4px;right:-4px;width:16px;height:16px;border-radius:50%;background:#ef4444;color:#fff;font-size:10px;font-weight:700;display:none;align-items:center;justify-content:center;border:2px solid var(--surface);';
+    btn.appendChild(badge);
+
+    var panel=document.createElement('div');
+    panel.id='notif-panel';
+    panel.style.cssText='display:none;position:absolute;top:44px;right:0;width:320px;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-md);z-index:500;overflow:hidden;';
+
+    wrap.appendChild(btn);
+    wrap.appendChild(panel);
+
+    // Insert before the search button in topbar
+    var btns=topbar.querySelectorAll('button');
+    var searchBtn=null;
+    btns.forEach(function(b){ if(b.querySelector('svg')) searchBtn=b; });
+    if(searchBtn && searchBtn.parentNode){
+      searchBtn.parentNode.insertBefore(wrap, searchBtn);
+    }
+
+    function getAlerts(){
+      var alerts=[];
+      try{
+        var raw=localStorage.getItem('obsidian_logistics_data');
+        if(!raw) return [{type:'success',msg:'All clear - no alerts!',icon:'&#10003;'}];
+        var d=JSON.parse(raw);
+        var payments=d.payments||[];
+        var overdue=payments.filter(function(p){return p.status==='Overdue';});
+        var pending=payments.filter(function(p){return p.status==='Pending';});
+        var trips=d.trips||[];
+        var delayed=trips.filter(function(t){return t.status==='Delayed';});
+        if(overdue.length) alerts.push({type:'danger',msg:overdue.length+' overdue payment'+(overdue.length>1?'s':'')+' - GHS '+overdue.reduce(function(s,p){return s+(parseFloat(p.amount)||0);},0).toLocaleString(),icon:'&#9888;'});
+        if(pending.length) alerts.push({type:'warning',msg:pending.length+' pending payment'+(pending.length>1?'s':'')+' awaiting action',icon:'&#9201;'});
+        if(delayed.length) alerts.push({type:'danger',msg:delayed.length+' delayed trip'+(delayed.length>1?'s':''),icon:'&#9888;'});
+        var rev=d.revenue||0;
+        var exp=(d.expenses||0)+(d.fuelCosts||0);
+        if(rev>0&&((rev-exp)/rev)*100<10) alerts.push({type:'warning',msg:'Low profit margin - review expenses',icon:'&#9888;'});
+        if(!alerts.length) alerts.push({type:'success',msg:'All systems clear!',icon:'&#10003;'});
+      }catch(e){}
+      return alerts;
+    }
+
+    function renderPanel(){
+      var alerts=getAlerts();
+      var urgent=alerts.filter(function(a){return a.type!=='success';}).length;
+      badge.style.display=urgent>0?'flex':'none';
+      badge.textContent=urgent||'';
+
+      var colors={danger:'#ef4444',warning:'#f59e0b',success:'#10b981'};
+      var bgs={danger:'var(--red-bg)',warning:'var(--orange-bg)',success:'var(--green-bg)'};
+      var html='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">'
+        +'<span style="font-weight:600;font-size:14px;color:var(--text-primary);">&#128276; Notifications</span>'
+        +(urgent?'<span style="background:#ef4444;color:#fff;font-size:11px;padding:1px 7px;border-radius:99px;">'+urgent+' alert'+(urgent>1?'s':'')+'</span>':'')
+        +'</div>';
+      alerts.forEach(function(a){
+        html+='<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start;">'
+          +'<div style="width:30px;height:30px;border-radius:8px;background:'+bgs[a.type]+';display:flex;align-items:center;justify-content:center;color:'+colors[a.type]+';font-size:14px;flex-shrink:0;">'+a.icon+'</div>'
+          +'<div style="font-size:13px;color:var(--text-primary);line-height:1.5;">'+a.msg+'</div>'
+          +'</div>';
+      });
+      html+='<div style="padding:10px 16px;font-size:11px;color:var(--text-muted);text-align:center;">Updates automatically from your data</div>';
+      panel.innerHTML=html;
+    }
+
+    btn.addEventListener('click',function(e){
+      e.stopPropagation();
+      renderPanel();
+      panel.style.display=panel.style.display==='none'?'block':'none';
+    });
+    document.addEventListener('click',function(){panel.style.display='none';});
+    panel.addEventListener('click',function(e){e.stopPropagation();});
+    renderPanel();
+  }
+
+  // ============================================================
+  // DATE FILTER + CSV EXPORT on Reports page
+  // ============================================================
+  function addReportsEnhancements(){
+    // Only run when Reports page is visible
+    var observer=new MutationObserver(function(){
+      var header=document.querySelector('header h1');
+      if(!header) return;
+      var title=header.textContent||'';
+      if(title.indexOf('Inventory')>-1 || title.indexOf('Revenue')>-1){
+        if(!document.getElementById('reports-addon')) injectReportsTools();
+      } else {
+        var el=document.getElementById('reports-addon');
+        if(el) el.remove();
+      }
+    });
+    observer.observe(document.body,{childList:true,subtree:true});
+  }
+
+  function injectReportsTools(){
+    var header=document.querySelector('header');
+    if(!header||document.getElementById('reports-addon')) return;
+
+    var wrap=document.createElement('div');
+    wrap.id='reports-addon';
+    wrap.style.cssText='display:flex;align-items:center;gap:8px;margin-right:8px;';
+
+    // Date from
+    var fromLabel=document.createElement('span');
+    fromLabel.style.cssText='font-size:12px;color:var(--text-muted);';
+    fromLabel.textContent='From';
+
+    var fromInput=document.createElement('input');
+    fromInput.type='date';
+    fromInput.id='filter-from';
+    fromInput.style.cssText='padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary);width:130px;';
+
+    var toLabel=document.createElement('span');
+    toLabel.style.cssText='font-size:12px;color:var(--text-muted);';
+    toLabel.textContent='to';
+
+    var toInput=document.createElement('input');
+    toInput.type='date';
+    toInput.id='filter-to';
+    toInput.style.cssText='padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary);width:130px;';
+
+    var exportBtn=document.createElement('button');
+    exportBtn.style.cssText='padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap;';
+    exportBtn.innerHTML='&#11015; Export CSV';
+
+    exportBtn.addEventListener('click',function(){
+      try{
+        var raw=localStorage.getItem('obsidian_logistics_data');
+        if(!raw){alert('No data to export');return;}
+        var d=JSON.parse(raw);
+        var entries=d.entries||[];
+        var from=fromInput.value?new Date(fromInput.value):null;
+        var to=toInput.value?new Date(toInput.value):null;
+        if(from||to){
+          entries=entries.filter(function(e){
+            if(!e.date)return true;
+            var parts=e.date.split('/');
+            var dt=parts.length===3?new Date(parts[2],parts[1]-1,parts[0]):new Date(e.date);
+            if(isNaN(dt))return true;
+            if(from&&dt<from)return false;
+            if(to&&dt>to)return false;
+            return true;
+          });
+        }
+        var lines=['Date,Country,Revenue,Expenses,Fuel,Tonnes,Trips,Profit,Note'];
+        entries.forEach(function(e){
+          var profit=(parseFloat(e.revenue)||0)-(parseFloat(e.expenses)||0)-(parseFloat(e.fuelCosts)||0);
+          lines.push([e.date,e.country,e.revenue,e.expenses,e.fuelCosts,e.tonnes||0,e.trips,profit.toFixed(2),(e.note||'').replace(/,/g,';')].join(','));
+        });
+        var blob=new Blob([lines.join(String.fromCharCode(10))],{type:'text/csv'});
+        var link=document.createElement('a');
+        link.href=URL.createObjectURL(blob);
+        link.download='obsidian_report_'+new Date().toISOString().slice(0,10)+'.csv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }catch(err){alert('Export failed: '+err.message);}
+    });
+
+    wrap.appendChild(fromLabel);
+    wrap.appendChild(fromInput);
+    wrap.appendChild(toLabel);
+    wrap.appendChild(toInput);
+    wrap.appendChild(exportBtn);
+
+    // Insert into topbar before action buttons
+    var actionArea=header.querySelector('div:last-child');
+    if(actionArea) actionArea.insertBefore(wrap, actionArea.firstChild);
+  }
+
+  waitForApp(function(){
+    addNotifications();
+    addReportsEnhancements();
+  });
+
+})();
+</script>
