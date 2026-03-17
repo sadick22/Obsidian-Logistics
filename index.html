@@ -285,15 +285,16 @@ This typically indicates that your device does not have a healthy Internet conne
   var patched={};
 
   function patchForms(){
-    // Expense ref number
     var exp=document.querySelector('input[placeholder="e.g. INV-001"]');
     if(exp&&!patched.exp){patched.exp=true;setVal(exp,uid('EXP'));goldStyle(exp);}
 
-    // Invoice number
     var inv=document.querySelector('input[placeholder="e.g. INV-2024-001"]');
     if(inv&&!patched.inv){patched.inv=true;setVal(inv,uid('INV'));goldStyle(inv);}
 
-    // "Other" category free text
+    // Reset patch flags when forms close so new ones get fresh IDs
+    if(!exp) patched.exp=false;
+    if(!inv) patched.inv=false;
+
     document.querySelectorAll('select').forEach(function(sel){
       if(sel._op)return;
       var hasOther=Array.from(sel.options).some(function(o){return o.value==='Other';});
@@ -311,7 +312,59 @@ This typically indicates that your device does not have a healthy Internet conne
     });
   }
 
-  // PDF invoice download
+  // ------ REF # column in Expense Records ------
+  function addRefColumn(){
+    document.querySelectorAll('table').forEach(function(table){
+      var ths=table.querySelectorAll('thead th');
+      if(!ths.length)return;
+      var texts=Array.from(ths).map(function(h){return(h.textContent||'').trim().toUpperCase();});
+      // Target expense table: has DATE + CATEGORY + DESCRIPTION
+      if(texts.indexOf('DATE')===-1||texts.indexOf('CATEGORY')===-1||texts.indexOf('DESCRIPTION')===-1)return;
+      // Already has REF column?
+      if(texts.indexOf('REF #')>-1)return;
+
+      // Add REF # as first header
+      var th=document.createElement('th');
+      th.textContent='REF #';
+      th.style.cssText='font-size:11px;font-weight:500;color:var(--text-muted);padding:10px 12px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;';
+      ths[0].parentNode.insertBefore(th, ths[0]);
+
+      // Load payments from localStorage to match ref numbers
+      var payments=[];
+      try{
+        var raw=localStorage.getItem('obsidian_logistics_data');
+        if(raw) payments=JSON.parse(raw).payments||[];
+      }catch(e){}
+
+      // Add ref cell to each body row
+      table.querySelectorAll('tbody tr').forEach(function(row){
+        if(row._refAdded)return;
+        row._refAdded=true;
+        var cells=row.querySelectorAll('td');
+        if(!cells.length)return;
+
+        // Try to match by description or date
+        var rowDate=(cells[0]?cells[0].textContent:'').trim();
+        var rowDesc=(cells[2]?cells[2].textContent:'').trim().split('\n')[0].trim();
+        var rowAmt=(cells[4]?cells[4].textContent:'').replace(/[^0-9]/g,'');
+
+        var refNum='--';
+        var match=payments.find(function(p){
+          var descOk=(p.description||'').trim()===rowDesc;
+          var amtOk=String(p.amount||'').replace(/[^0-9]/g,'')===rowAmt;
+          return descOk||amtOk;
+        });
+        if(match&&match.refNumber) refNum=match.refNumber;
+
+        var td=document.createElement('td');
+        td.style.cssText='padding:12px 12px;font-size:11px;font-weight:600;color:#c8a86e;white-space:nowrap;border-bottom:1px solid var(--border);font-family:monospace;letter-spacing:.03em;';
+        td.textContent=refNum;
+        row.insertBefore(td, row.firstChild);
+      });
+    });
+  }
+
+  // ------ PDF invoice ------
   function logoSVG(){return '<svg width="36" height="36" viewBox="0 0 36 36" xmlns="http://www.w3.org/2000/svg"><polygon points="18,2 32,10 32,26 18,34 4,26 4,10" fill="#1c1c1e" stroke="#c8a86e" stroke-width="1.5"/><polygon points="18,7 28,13 28,23 18,29 8,23 8,13" fill="#2a2a2e"/><polygon points="18,7 28,13 18,18" fill="#c8a86e" opacity="0.9"/><polygon points="18,18 28,23 18,29" fill="#c8a86e" opacity="0.7"/><polygon points="18,7 18,18 8,13" fill="#e0c080" opacity="0.8"/></svg>';}
 
   function addPdfBtn(row,cells){
@@ -338,39 +391,33 @@ This typically indicates that your device does not have a healthy Internet conne
       var sub=(parseFloat(it.qty)||1)*(parseFloat(it.price)||0);
       return '<tr style="border-bottom:1px solid #eee"><td style="padding:8px">'+(i+1)+'</td><td style="padding:8px">'+(it.description||'')+'</td><td style="padding:8px;text-align:center">'+(it.qty||1)+'</td><td style="padding:8px;text-align:right">GHS '+(parseFloat(it.price)||0).toLocaleString()+'</td><td style="padding:8px;text-align:right;font-weight:600">GHS '+sub.toLocaleString()+'</td></tr>';
     }).join(''):'<tr><td colspan="5" style="padding:16px;text-align:center;color:#999;font-size:13px">Logistics / Transportation Services</td></tr>';
-
-    var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+num+'</title>'
-    +'<style>body{font-family:Georgia,serif;margin:0;color:#1a1a2e}div.p{max-width:760px;margin:0 auto;padding:48px}.h{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1c1c1e;padding-bottom:24px;margin-bottom:36px}.logo{display:flex;align-items:center;gap:12px}.cn{font-size:20px;font-weight:700;letter-spacing:1px}.cs{font-size:10px;color:#c8a86e;letter-spacing:3px;text-transform:uppercase}.ir{text-align:right}.ir h1{font-size:34px;font-weight:700;margin:0;letter-spacing:2px}.in{font-size:13px;color:#c8a86e;font-weight:600;margin-top:3px}.sb{display:inline-block;padding:3px 12px;border-radius:99px;font-size:12px;font-weight:600;margin-top:6px;background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44}.meta{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-bottom:32px}.mb h3{font-size:10px;color:#9ca3af;letter-spacing:2px;text-transform:uppercase;margin:0 0 6px}.mb p{font-size:13px;margin:3px 0}table{width:100%;border-collapse:collapse;margin-bottom:20px}thead th{background:#1c1c1e;color:#fff;padding:10px 8px;font-size:11px;letter-spacing:1px;text-transform:uppercase;text-align:left}thead th:last-child,thead th:nth-child(4){text-align:right}thead th:nth-child(3){text-align:center}tbody tr:nth-child(even){background:#fafafa}.tb{display:flex;justify-content:flex-end;margin-bottom:28px}.ti{background:#1c1c1e;color:#fff;padding:18px 24px;border-radius:10px}.tl{font-size:10px;color:#c8a86e;letter-spacing:2px;text-transform:uppercase}.ta{font-size:26px;font-weight:700;margin-top:3px}.ft{border-top:1px solid #e8eaed;padding-top:16px;display:flex;justify-content:space-between}.ft p{font-size:11px;color:#9ca3af;margin:2px 0}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style>'
-    +'</head><body><div class="p"><div class="h"><div class="logo">'+logoSVG()+'<div><div class="cn">Obsidian Logistics Co.</div><div class="cs">Moving Trade Across Borders</div></div></div><div class="ir"><h1>INVOICE</h1><div class="in">'+num+'</div><div><span class="sb">'+stat+'</span></div></div></div>'
-    +'<div class="meta"><div class="mb"><h3>Bill To</h3><p style="font-weight:600;font-size:15px">'+client+'</p></div><div class="mb"><h3>Details</h3><p><b>Type:</b> '+type+'</p><p><b>Date:</b> '+date+'</p><p><b>Due:</b> '+due+'</p></div></div>'
-    +'<table><thead><tr><th>#</th><th>Description</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead><tbody>'+rows+'</tbody></table>'
-    +'<div class="tb"><div class="ti"><div class="tl">Total Amount</div><div class="ta">'+amt+'</div></div></div>'
-    +(notes?'<div style="background:#fafafa;border-left:4px solid #c8a86e;padding:12px 16px;border-radius:0 8px 8px 0;font-size:13px;color:#6b7280;margin-bottom:28px"><b>Notes:</b> '+notes+'</div>':'')
-    +'<div class="ft"><div><p style="color:#c8a86e;font-weight:600">Obsidian Logistics Co.</p><p>Ghana, West Africa</p></div><div style="text-align:right"><p>Thank you for your business!</p><p style="color:#c8a86e;font-weight:600">obsidian-logistics.vercel.app</p></div></div>'
-    +'</div><scr'+'ipt>window.onload=function(){window.print();}</scr'+'ipt></body></html>';
+    var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>'+num+'</title><style>body{font-family:Georgia,serif;margin:0;color:#1a1a2e}div.p{max-width:760px;margin:0 auto;padding:48px}.h{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1c1c1e;padding-bottom:24px;margin-bottom:36px}.logo{display:flex;align-items:center;gap:12px}.cn{font-size:20px;font-weight:700;letter-spacing:1px}.cs{font-size:10px;color:#c8a86e;letter-spacing:3px;text-transform:uppercase}.ir{text-align:right}.ir h1{font-size:34px;font-weight:700;margin:0}.in{font-size:13px;color:#c8a86e;font-weight:600;margin-top:3px}.sb{display:inline-block;padding:3px 12px;border-radius:99px;font-size:12px;font-weight:600;margin-top:6px;background:'+sc+'22;color:'+sc+';border:1px solid '+sc+'44}.meta{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-bottom:32px}.mb h3{font-size:10px;color:#9ca3af;letter-spacing:2px;text-transform:uppercase;margin:0 0 6px}.mb p{font-size:13px;margin:3px 0}table{width:100%;border-collapse:collapse;margin-bottom:20px}thead th{background:#1c1c1e;color:#fff;padding:10px 8px;font-size:11px;letter-spacing:1px;text-transform:uppercase;text-align:left}tbody tr:nth-child(even){background:#fafafa}.tb{display:flex;justify-content:flex-end;margin-bottom:28px}.ti{background:#1c1c1e;color:#fff;padding:18px 24px;border-radius:10px}.tl{font-size:10px;color:#c8a86e;letter-spacing:2px;text-transform:uppercase}.ta{font-size:26px;font-weight:700;margin-top:3px}.ft{border-top:1px solid #e8eaed;padding-top:16px;display:flex;justify-content:space-between}.ft p{font-size:11px;color:#9ca3af;margin:2px 0}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><div class="p"><div class="h"><div class="logo">'+logoSVG()+'<div><div class="cn">Obsidian Logistics Co.</div><div class="cs">Moving Trade Across Borders</div></div></div><div class="ir"><h1>INVOICE</h1><div class="in">'+num+'</div><div><span class="sb">'+stat+'</span></div></div></div><div class="meta"><div class="mb"><h3>Bill To</h3><p style="font-weight:600;font-size:15px">'+client+'</p></div><div class="mb"><h3>Details</h3><p><b>Type:</b> '+type+'</p><p><b>Date:</b> '+date+'</p><p><b>Due:</b> '+due+'</p></div></div><table><thead><tr><th>#</th><th>Description</th><th>Qty</th><th>Unit Price</th><th>Total</th></tr></thead><tbody>'+rows+'</tbody></table><div class="tb"><div class="ti"><div class="tl">Total Amount</div><div class="ta">'+amt+'</div></div></div>'+(notes?'<div style="background:#fafafa;border-left:4px solid #c8a86e;padding:12px 16px;border-radius:0 8px 8px 0;font-size:13px;color:#6b7280;margin-bottom:28px"><b>Notes:</b> '+notes+'</div>':'')+'<div class="ft"><div><p style="color:#c8a86e;font-weight:600">Obsidian Logistics Co.</p><p>Ghana, West Africa</p></div><div style="text-align:right"><p>Thank you for your business!</p><p style="color:#c8a86e;font-weight:600">obsidian-logistics.vercel.app</p></div></div></div><scr'+'ipt>window.onload=function(){window.print();}</scr'+'ipt></body></html>';
     var w=window.open('','_blank','width=880,height=680');
     if(w){w.document.write(html);w.document.close();}
   }
 
-  // Scan invoice table every 2s for new rows needing PDF buttons
   function scanInvoices(){
     document.querySelectorAll('table').forEach(function(t){
       var ths=Array.from(t.querySelectorAll('thead th')).map(function(h){return(h.textContent||'').trim().toUpperCase();});
       if(ths.indexOf('INVOICE #')===-1&&ths.indexOf('TYPE')===-1)return;
       t.querySelectorAll('tbody tr').forEach(function(row){
         var cells=row.querySelectorAll('td');
-        var hasInv=Array.from(cells).some(function(c){return(c.textContent||'').indexOf('INV-')>-1;});
-        if(hasInv)addPdfBtn(row,cells);
+        if(Array.from(cells).some(function(c){return(c.textContent||'').indexOf('INV-')>-1;}))
+          addPdfBtn(row,cells);
       });
     });
   }
 
-  // Run once on load, then observe for form opens
   wait(function(){
-    var ob=new MutationObserver(function(){patchForms();scanInvoices();});
+    var ob=new MutationObserver(function(){
+      patchForms();
+      scanInvoices();
+      addRefColumn();
+    });
     ob.observe(document.body,{childList:true,subtree:true});
     patchForms();
     scanInvoices();
+    addRefColumn();
   });
 })();
 </script>
