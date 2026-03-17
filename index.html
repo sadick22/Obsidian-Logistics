@@ -259,3 +259,89 @@ This typically indicates that your device does not have a healthy Internet conne
 
 })();
 </script>
+<script>
+(function(){
+  'use strict';
+
+  function patchExpenseForm(){
+    var observer = new MutationObserver(function(){
+
+      // ── 1. Auto-generate Invoice / Reference Number ──
+      var refInput = document.querySelector('input[placeholder="e.g. INV-001"]');
+      if(refInput && !refInput.dataset.patched){
+        refInput.dataset.patched = 'true';
+
+        // Build invoice number: INV-YYYYMMDD-XXXX
+        var count = 0;
+        try {
+          var raw = localStorage.getItem('obsidian_logistics_data');
+          if(raw){ var d = JSON.parse(raw); count = (d.payments||[]).length; }
+        } catch(e){}
+        var now = new Date();
+        var mm = String(now.getMonth()+1).padStart(2,'0');
+        var dd = String(now.getDate()).padStart(2,'0');
+        var num = String(count + 1).padStart(4,'0');
+        var generated = 'INV-' + now.getFullYear() + mm + dd + '-' + num;
+
+        // Inject value via React's internal setter so it registers
+        var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value');
+        if(setter && setter.set){
+          setter.set.call(refInput, generated);
+          refInput.dispatchEvent(new Event('input',{bubbles:true}));
+          refInput.dispatchEvent(new Event('change',{bubbles:true}));
+        } else {
+          refInput.value = generated;
+        }
+
+        // Style as auto-generated (gold italic)
+        refInput.style.color = '#c8a86e';
+        refInput.style.fontStyle = 'italic';
+        refInput.title = 'Auto-generated. Click to edit.';
+
+        refInput.addEventListener('focus', function(){
+          refInput.style.color = 'var(--text-primary)';
+          refInput.style.fontStyle = 'normal';
+          refInput.select();
+        });
+      }
+
+      // ── 2. "Other" category → free text input ──
+      var selects = document.querySelectorAll('select');
+      selects.forEach(function(sel){
+        var hasOther = Array.from(sel.options).some(function(o){ return o.value === 'Other'; });
+        if(!hasOther || sel.dataset.otherPatched) return;
+        sel.dataset.otherPatched = 'true';
+
+        var customInput = document.createElement('input');
+        customInput.type = 'text';
+        customInput.placeholder = 'Describe the expense category...';
+        customInput.style.cssText = 'display:none;margin-top:8px;width:100%;padding:9px 12px;border:1px solid var(--gold);border-radius:8px;background:var(--surface);color:var(--text-primary);font-size:14px;font-family:inherit;outline:none;box-shadow:0 0 0 3px rgba(200,168,110,0.15);box-sizing:border-box;';
+
+        sel.parentNode.style.position = 'relative';
+        sel.parentNode.appendChild(customInput);
+
+        sel.addEventListener('change', function(){
+          if(sel.value === 'Other'){
+            customInput.style.display = 'block';
+            setTimeout(function(){ customInput.focus(); }, 50);
+          } else {
+            customInput.style.display = 'none';
+            customInput.value = '';
+          }
+        });
+      });
+    });
+
+    observer.observe(document.body, {childList:true, subtree:true, attributes:true});
+  }
+
+  function waitForApp(cb){
+    var t = setInterval(function(){
+      var r = document.getElementById('root');
+      if(r && r.children.length > 0){ clearInterval(t); setTimeout(cb, 800); }
+    }, 300);
+  }
+
+  waitForApp(patchExpenseForm);
+})();
+</script>
