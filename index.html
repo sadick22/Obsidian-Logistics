@@ -727,20 +727,28 @@ This typically indicates that your device does not have a healthy Internet conne
     if(!isDriversPage())return;
     if(document.getElementById('drv-form-extra'))return;
 
-    // Find form h3
+    // Find the drivers form card precisely:
+    // It's a .card with gold border (borderColor:#c8a86e) containing a .form-grid
     var formContainer=null;
-    var allH3=document.querySelectorAll('h3');
-    for(var i=0;i<allH3.length;i++){
-      var txt=(allH3[i].textContent||'').trim();
-      if(txt.indexOf('Driver')>-1){
-        var el=allH3[i];
-        for(var j=0;j<12;j++){
-          if(!el.parentElement)break;
-          el=el.parentElement;
-          var s=el.style.cssText||'';
-          if(s.indexOf('padding')>-1&&s.indexOf('border')>-1){formContainer=el;break;}
+    var cards=document.querySelectorAll('.card');
+    for(var i=0;i<cards.length;i++){
+      var card=cards[i];
+      var cs=card.style.cssText||'';
+      // Gold border = Add/Edit Driver form
+      if(cs.indexOf('c8a86e')>-1||cs.indexOf('C8A86E')>-1){
+        if(card.querySelector('.form-grid')){
+          formContainer=card;break;
         }
-        break;
+      }
+    }
+    // Fallback: find by h3 text
+    if(!formContainer){
+      var allH3=document.querySelectorAll('h3');
+      for(var i=0;i<allH3.length;i++){
+        var txt=(allH3[i].textContent||'').trim();
+        if((txt==='Add New Driver'||txt==='Edit Driver')&&allH3[i].closest('.card')){
+          formContainer=allH3[i].closest('.card');break;
+        }
       }
     }
     if(!formContainer)return;
