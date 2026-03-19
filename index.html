@@ -649,3 +649,394 @@ This typically indicates that your device does not have a healthy Internet conne
   });
 })();
 </script>
+
+<script>
+(function(){
+  'use strict';
+
+  function wait(cb){
+    var t=setInterval(function(){
+      var r=document.getElementById('root');
+      if(r&&r.children.length>0){clearInterval(t);setTimeout(cb,1500);}
+    },300);
+  }
+
+  function isDriversPage(){
+    var h=document.querySelector('header h1');
+    return h&&(h.textContent||'').indexOf('Driver')>-1;
+  }
+
+  // Read React fiber to get data + update function
+  function getReactContext(){
+    try{
+      var root=document.getElementById('root');
+      if(!root)return null;
+      var fiberKey=null;
+      var keys=Object.keys(root);
+      for(var i=0;i<keys.length;i++){if(keys[i].indexOf('__reactFiber')===0){fiberKey=keys[i];break;}}
+      if(!fiberKey)return null;
+      function walk(node,depth){
+        if(!node||depth>600)return null;
+        try{
+          if(node.memoizedProps&&node.memoizedProps.value&&node.memoizedProps.value.data&&node.memoizedProps.value.update){
+            return node.memoizedProps.value;
+          }
+        }catch(e){}
+        var found=null;
+        try{if(node.child)found=walk(node.child,depth+1);}catch(e){}
+        if(!found){try{if(node.sibling)found=walk(node.sibling,depth+1);}catch(e){}}
+        return found;
+      }
+      return walk(root[fiberKey],0);
+    }catch(e){return null;}
+  }
+
+  // Save extra fields to a driver using React update()
+  function saveExtraToDriver(extraData){
+    try{
+      var ctx=getReactContext();
+      if(!ctx||!ctx.data||!ctx.update)return;
+      var drivers=ctx.data.drivers||[];
+      if(!drivers.length)return;
+      var newest=drivers[drivers.length-1];
+      var updated=drivers.map(function(d){
+        if(d.id===newest.id){
+          var copy={};
+          for(var k in d)if(Object.prototype.hasOwnProperty.call(d,k))copy[k]=d[k];
+          for(var k2 in extraData)if(Object.prototype.hasOwnProperty.call(extraData,k2))copy[k2]=extraData[k2];
+          return copy;
+        }
+        return d;
+      });
+      ctx.update({drivers:updated});
+    }catch(e){console.log('saveExtra error',e);}
+  }
+
+  var pendingDocs={};
+  var pendingFields={};
+
+  var DOC_TYPES=[
+    {key:'licenseDoc',   label:"Driver's License"},
+    {key:'idDoc',        label:'National ID'},
+    {key:'healthDoc',    label:'Health Insurance Card'},
+    {key:'ghanaCardDoc', label:'Ghana Card'},
+    {key:'passportDoc',  label:'Passport'},
+  ];
+
+  function patchForm(){
+    if(!isDriversPage())return;
+    if(document.getElementById('drv-form-extra'))return;
+
+    // Find form h3
+    var formContainer=null;
+    var allH3=document.querySelectorAll('h3');
+    for(var i=0;i<allH3.length;i++){
+      var txt=(allH3[i].textContent||'').trim();
+      if(txt.indexOf('Driver')>-1){
+        var el=allH3[i];
+        for(var j=0;j<12;j++){
+          if(!el.parentElement)break;
+          el=el.parentElement;
+          var s=el.style.cssText||'';
+          if(s.indexOf('padding')>-1&&s.indexOf('border')>-1){formContainer=el;break;}
+        }
+        break;
+      }
+    }
+    if(!formContainer)return;
+    var grid=formContainer.querySelector('.form-grid');
+    if(!grid)return;
+
+    var wrap=document.createElement('div');
+    wrap.id='drv-form-extra';
+    wrap.style.cssText='grid-column:1/-1;';
+
+    // ------ Performance & Contact ------
+    var perfSection=document.createElement('div');
+    perfSection.style.cssText='border-top:1px solid var(--border);padding-top:16px;margin-top:4px;margin-bottom:16px;';
+    perfSection.innerHTML='<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Performance &amp; Contact</div>';
+    var perfGrid=document.createElement('div');
+    perfGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:14px;';
+    [{k:'fp_phone',l:'Phone Number',t:'text'},{k:'fp_license',l:'License Number',t:'text'},{k:'fp_earnings',l:'Total Earnings (GHS)',t:'number'},{k:'fp_ontime',l:'On-Time Rate (%)',t:'number'}].forEach(function(f){
+      var w=document.createElement('div');
+      var lb=document.createElement('label');
+      lb.style.cssText='font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:5px;';
+      lb.textContent=f.l;
+      var ip=document.createElement('input');
+      ip.type=f.t;ip.id=f.k;ip.placeholder=f.l;
+      ip.style.cssText='width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text-primary);outline:none;box-sizing:border-box;font-family:inherit;';
+      ip.onfocus=function(){this.style.borderColor='#c8a86e';this.style.boxShadow='0 0 0 3px rgba(200,168,110,0.15)';};
+      ip.onblur=function(){this.style.borderColor='var(--border)';this.style.boxShadow='none';};
+      w.appendChild(lb);w.appendChild(ip);perfGrid.appendChild(w);
+    });
+    perfSection.appendChild(perfGrid);
+
+    // ------ Upload Documents ------
+    var docsSection=document.createElement('div');
+    docsSection.style.cssText='border-top:1px solid var(--border);padding-top:16px;';
+    docsSection.innerHTML='<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Upload Documents</div>';
+    var docsGrid=document.createElement('div');
+    docsGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:12px;';
+
+    DOC_TYPES.forEach(function(doc){
+      var w=document.createElement('div');
+      var lb=document.createElement('label');
+      lb.style.cssText='font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:6px;';
+      lb.textContent=doc.label;
+
+      var box=document.createElement('div');
+      box.style.cssText='border:1.5px dashed var(--border);border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;background:var(--surface2);cursor:pointer;transition:all 0.2s;';
+
+      var span=document.createElement('span');
+      span.id='fp_lbl_'+doc.key;
+      span.style.cssText='font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;';
+      span.textContent='Click to upload PDF or image';
+
+      var icon=document.createElement('span');
+      icon.style.cssText='font-size:15px;flex-shrink:0;margin-left:8px;';
+      icon.textContent='----';
+
+      var fi=document.createElement('input');
+      fi.type='file';fi.accept='image/*,.pdf';fi.style.display='none';
+
+      box.appendChild(span);box.appendChild(icon);box.appendChild(fi);
+      box.onclick=function(){fi.click();};
+      box.onmouseenter=function(){if(!pendingDocs[doc.key])box.style.borderColor='#c8a86e';};
+      box.onmouseleave=function(){if(!pendingDocs[doc.key])box.style.borderColor='var(--border)';};
+
+      (function(d,inp,sp,bx){
+        inp.onchange=function(){
+          var file=inp.files[0];
+          if(!file)return;
+          if(file.size>2097152){alert('Max file size is 2MB');return;}
+          var reader=new FileReader();
+          reader.onload=function(ev){
+            pendingDocs[d.key]={data:ev.target.result,name:file.name};
+            sp.textContent='--- '+file.name;
+            sp.style.color='#10b981';
+            bx.style.borderColor='#10b981';
+            bx.style.background='rgba(16,185,129,0.05)';
+          };
+          reader.readAsDataURL(file);
+        };
+      })(doc,fi,span,box);
+
+      w.appendChild(lb);w.appendChild(box);docsGrid.appendChild(w);
+    });
+    docsSection.appendChild(docsGrid);
+
+    wrap.appendChild(perfSection);
+    wrap.appendChild(docsSection);
+    grid.appendChild(wrap);
+
+    // ------ Intercept Add Driver button ------
+    var saveBtn=formContainer.querySelector('button.btn-gold');
+    if(saveBtn&&!saveBtn._fp_saved){
+      saveBtn._fp_saved=true;
+      saveBtn.addEventListener('click',function(){
+        // Collect field values before React clears the form
+        var ph=document.getElementById('fp_phone');
+        var li=document.getElementById('fp_license');
+        var ea=document.getElementById('fp_earnings');
+        var ot=document.getElementById('fp_ontime');
+        var extra={};
+        if(ph&&ph.value)extra.phone=ph.value;
+        if(li&&li.value)extra.license=li.value;
+        if(ea&&ea.value)extra.earnings=parseFloat(ea.value)||0;
+        if(ot&&ot.value)extra.onTimeRate=parseFloat(ot.value)||100;
+        // Collect docs
+        Object.keys(pendingDocs).forEach(function(k){
+          extra[k]=pendingDocs[k].data;
+          extra[k+'Name']=pendingDocs[k].name;
+        });
+
+        if(Object.keys(extra).length===0)return;
+
+        // Wait for React to save the new driver, then patch it
+        setTimeout(function(){saveExtraToDriver(extra);},900);
+        setTimeout(function(){saveExtraToDriver(extra);},1800); // retry
+
+        // Reset form UI
+        setTimeout(function(){
+          pendingDocs={};
+          ['fp_phone','fp_license','fp_earnings','fp_ontime'].forEach(function(id){
+            var el=document.getElementById(id);if(el)el.value='';
+          });
+          DOC_TYPES.forEach(function(doc){
+            var sp=document.getElementById('fp_lbl_'+doc.key);
+            if(sp){sp.textContent='Click to upload PDF or image';sp.style.color='var(--text-muted)';}
+          });
+        },1000);
+      });
+    }
+  }
+
+  // ------ Docs modal triggered from table DOCS column ------
+  function showDocsModal(driver,updateFn){
+    var ex=document.getElementById('docs-modal');if(ex)ex.remove();
+    var ov=document.createElement('div');
+    ov.id='docs-modal';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;';
+    ov.onclick=function(e){if(e.target===ov)ov.remove();};
+    var box=document.createElement('div');
+    box.style.cssText='background:var(--surface);border-radius:16px;padding:28px;width:100%;max-width:560px;max-height:88vh;overflow-y:auto;box-shadow:0 8px 40px rgba(139,92,246,0.25);';
+    box.onclick=function(e){e.stopPropagation();};
+    box.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">'
+      +'<div><div style="font-weight:700;font-size:17px;color:var(--text-primary);">'+driver.name+'</div>'
+      +'<div style="font-size:13px;color:var(--text-muted);margin-top:2px;">Documents &amp; Performance</div></div>'
+      +'<button id="cls-docs" style="width:32px;height:32px;border:1px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;color:var(--text-secondary);font-size:16px;">&#10005;</button></div>'
+      +'<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:14px;">Documents</div>';
+
+    DOC_TYPES.forEach(function(doc){
+      var row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface2);border-radius:10px;border:1px solid var(--border);margin-bottom:10px;';
+      var hasDoc=!!driver[doc.key];
+      var docName=driver[doc.key+'Name']||'Uploaded';
+      var left=document.createElement('div');left.style.cssText='display:flex;align-items:center;gap:12px;';
+      var iconBox=document.createElement('div');
+      iconBox.style.cssText='width:36px;height:36px;border-radius:8px;background:'+(hasDoc?'rgba(200,168,110,0.15)':'var(--surface3)')+';display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;';
+      iconBox.textContent='----';
+      var info=document.createElement('div');
+      info.innerHTML='<div style="font-weight:500;font-size:13px;color:var(--text-primary);">'+doc.label+'</div>'
+        +'<div style="font-size:11px;color:'+(hasDoc?'#c8a86e':'var(--text-muted)')+';">'+(hasDoc?docName:'Not uploaded yet')+'</div>';
+      left.appendChild(iconBox);left.appendChild(info);
+      var btns=document.createElement('div');btns.style.cssText='display:flex;gap:6px;flex-shrink:0;';
+      var fi=document.createElement('input');fi.type='file';fi.accept='image/*,.pdf';fi.style.display='none';
+      var ub=document.createElement('button');
+      ub.style.cssText='padding:6px 12px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;font-family:inherit;';
+      ub.textContent=hasDoc?'Replace':'Upload';
+      (function(d,inp,btn){
+        inp.onchange=function(){
+          var file=inp.files[0];if(!file)return;
+          if(file.size>2097152){alert('Max 2MB');return;}
+          var fr=new FileReader();
+          fr.onload=function(ev){
+            driver[d.key]=ev.target.result;driver[d.key+'Name']=file.name;
+            if(updateFn)updateFn(driver);
+            ov.remove();setTimeout(function(){showDocsModal(driver,updateFn);},200);
+          };fr.readAsDataURL(file);
+        };btn.onclick=function(){inp.click();};
+      })(doc,fi,ub);
+      btns.appendChild(fi);btns.appendChild(ub);
+      if(hasDoc){
+        var vb=document.createElement('button');
+        vb.style.cssText='padding:6px 12px;border:1px solid #c8a86e;border-radius:7px;background:rgba(200,168,110,0.1);color:#c8a86e;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;';
+        vb.innerHTML='&#128065; View';
+        (function(data){vb.onclick=function(){
+          var w=window.open('','_blank');
+          if(w){
+            var isPdf=data.indexOf('data:application/pdf')===0;
+            w.document.write(isPdf
+              ?'<html><body style="margin:0;"><iframe src="'+data+'" style="width:100%;height:100vh;border:none;"></iframe></body></html>'
+              :'<html><body style="margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="'+data+'" style="max-width:100%;max-height:100vh;"></body></html>');
+            w.document.close();
+          }
+        };})(driver[doc.key]);
+        btns.appendChild(vb);
+        var dl=document.createElement('a');
+        dl.href=driver[doc.key];dl.download=docName;
+        dl.style.cssText='padding:6px 11px;border:1px solid #3b82f6;border-radius:7px;color:#3b82f6;font-size:12px;text-decoration:none;white-space:nowrap;';
+        dl.textContent='Download';btns.appendChild(dl);
+        var db=document.createElement('button');
+        db.style.cssText='padding:6px 10px;border:1px solid rgba(239,68,68,0.4);border-radius:7px;background:transparent;color:#ef4444;font-size:12px;cursor:pointer;';
+        db.innerHTML='&#128465;';
+        (function(d){db.onclick=function(){if(!confirm('Remove?'))return;delete driver[d.key];delete driver[d.key+'Name'];if(updateFn)updateFn(driver);ov.remove();setTimeout(function(){showDocsModal(driver,updateFn);},200);};})(doc);
+        btns.appendChild(db);
+      }
+      row.appendChild(left);row.appendChild(btns);box.appendChild(row);
+    });
+
+    // Performance edit
+    var perf=document.createElement('div');
+    perf.style.cssText='margin-top:20px;border-top:1px solid var(--border);padding-top:16px;';
+    perf.innerHTML='<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Performance &amp; Info</div>';
+    var g=document.createElement('div');g.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;';
+    var inps={};
+    [{key:'earnings',l:'Earnings (GHS)',t:'number'},{key:'onTimeRate',l:'On-Time (%)',t:'number'},{key:'phone',l:'Phone',t:'text'},{key:'license',l:'License No.',t:'text'}].forEach(function(f){
+      var w=document.createElement('div');
+      var lb=document.createElement('label');lb.style.cssText='font-size:12px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:4px;';lb.textContent=f.l;
+      var ip=document.createElement('input');ip.type=f.t;ip.value=driver[f.key]||'';
+      ip.style.cssText='width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-primary);font-size:13px;font-family:inherit;box-sizing:border-box;';
+      inps[f.key]=ip;w.appendChild(lb);w.appendChild(ip);g.appendChild(w);
+    });
+    var sb=document.createElement('button');
+    sb.style.cssText='width:100%;padding:11px;background:#c8a86e;border:none;border-radius:10px;color:#1c1c1e;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;';
+    sb.textContent='Save Changes';
+    sb.onclick=function(){
+      Object.keys(inps).forEach(function(k){driver[k]=inps[k].value;});
+      if(updateFn)updateFn(driver);
+      sb.textContent='Saved! ---';sb.style.background='#10b981';sb.style.color='#fff';
+      setTimeout(function(){ov.remove();},900);
+    };
+    perf.appendChild(g);perf.appendChild(sb);box.appendChild(perf);
+    ov.appendChild(box);document.body.appendChild(ov);
+    document.getElementById('cls-docs').onclick=function(){ov.remove();};
+  }
+
+  // ------ DOCS column in table ------
+  function enhanceTable(){
+    if(!isDriversPage())return;
+    var ctx=getReactContext();
+    var drivers=(ctx&&ctx.data&&ctx.data.drivers)||[];
+
+    document.querySelectorAll('table').forEach(function(table){
+      var ths=Array.from(table.querySelectorAll('thead th'));
+      var hdrs=ths.map(function(t){return(t.textContent||'').trim().toUpperCase();});
+      if(!hdrs.some(function(h){return h.indexOf('DRIVER')>-1;}))return;
+      var actTh=ths[ths.length-1];
+      if(hdrs.indexOf('DOCS')===-1){
+        var th=document.createElement('th');th.textContent='DOCS';
+        th.style.cssText='font-size:12px;font-weight:500;color:var(--text-muted);padding:10px 14px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.05em;';
+        actTh.parentNode.insertBefore(th,actTh);
+      }
+      table.querySelectorAll('tbody tr').forEach(function(row){
+        if(row._drv)return;row._drv=true;
+        var cells=row.querySelectorAll('td');if(!cells.length)return;
+        var name='';
+        var divs=row.querySelectorAll('div');
+        for(var i=0;i<divs.length;i++){
+          var el=divs[i];if(el.children.length>0)continue;
+          var txt=(el.textContent||'').trim();
+          var css=el.style.cssText||'';
+          if(txt.length>2&&txt.length<50&&css.indexOf('500')>-1&&txt.indexOf('@')===-1){name=txt;break;}
+        }
+        var driver=null;
+        for(var j=0;j<drivers.length;j++){if((drivers[j].name||'')==name){driver=drivers[j];break;}}
+        var docCount=driver?['licenseDoc','idDoc','healthDoc','ghanaCardDoc','passportDoc'].filter(function(k){return driver[k];}).length:0;
+        var lastTd=cells[cells.length-1];
+        var td=document.createElement('td');td.style.cssText='padding:8px 14px;';
+        var btn=document.createElement('button');
+        btn.style.cssText='padding:5px 12px;border:1px solid '+(docCount>0?'#c8a86e':'var(--border)')+';border-radius:7px;background:transparent;color:'+(docCount>0?'#c8a86e':'var(--text-muted)')+';font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;';
+        btn.innerHTML=docCount>0?'&#128196; '+docCount+' PDF'+(docCount>1?'s':''):'&#43; Add Docs';
+        if(driver){
+          (function(drv){
+            btn.onclick=function(e){
+              e.stopPropagation();
+              var ctx2=getReactContext();
+              var updateFn=ctx2?function(updated){
+                var all=(ctx2.data.drivers||[]).map(function(d){return d.id===updated.id?updated:d;});
+                ctx2.update({drivers:all});
+              }:null;
+              showDocsModal(drv,updateFn);
+            };
+          })(driver);
+        }
+        td.appendChild(btn);lastTd.parentNode.insertBefore(td,lastTd);
+      });
+    });
+  }
+
+  wait(function(){
+    var _t=null;
+    new MutationObserver(function(){
+      clearTimeout(_t);
+      _t=setTimeout(function(){
+        patchForm();
+        enhanceTable();
+      },600);
+    }).observe(document.body,{childList:true,subtree:true});
+    patchForm();
+    enhanceTable();
+  });
+})();
+</script>
