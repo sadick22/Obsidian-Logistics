@@ -449,7 +449,7 @@ This typically indicates that your device does not have a healthy Internet conne
 
   // Read directly from the rendered TABLE rows - guaranteed to be in sync with React
   function readFromTable(){
-    var result={total:0,cars:[],trips:0,trucks:[]};
+    var result={total:0,cars:[],trips:0,trucks:[],onLeave:0};
     var rows=document.querySelectorAll('table tbody tr');
     rows.forEach(function(row){
       var cells=row.querySelectorAll('td');
@@ -457,6 +457,7 @@ This typically indicates that your device does not have a healthy Internet conne
       result.total++;
       // CAR NUMBER is the 4th visible data column (index 4 counting from checkbox)
       // Order: checkbox(0), name(1), status(2), year(3), carNumber(4), trips(5), truck(6)
+      var statusCell=cells[2];if(statusCell&&(statusCell.textContent||'').indexOf('On Leave')>-1)result.onLeave++;
       var carCell=cells[4];
       var tripsCell=cells[5];
       var truckCell=cells[6];
@@ -595,8 +596,6 @@ This typically indicates that your device does not have a healthy Internet conne
     if(old)old.remove();
 
     var info=readFromTable();
-    var wages=getWages();
-
     var carDisplay=info.cars.length===0?'---':info.cars.length===1?info.cars[0]:info.cars.length+' cars';
     var truckDisplay=info.trucks.length===0?'---':info.trucks.length===1?info.trucks[0]:info.trucks.length+' trucks';
 
@@ -620,7 +619,7 @@ This typically indicates that your device does not have a healthy Internet conne
       {l:'Car Number',    v:carDisplay,    sub:info.cars.length+' assigned',   c:'var(--text-primary)'},
       {l:'Total Trips',   v:info.trips,    sub:'across all drivers',           c:'#3b82f6'},
       {l:'Truck',         v:truckDisplay,  sub:info.trucks.length+' assigned', c:'var(--text-primary)'},
-      {l:'Driver Wages',  v:'GHS '+wages.toLocaleString(), sub:'from Payments page', c:'#10b981'},
+      {l:'On Leave',      v:info.onLeave,  sub:'drivers on leave', c:'#f59e0b'},
     ].forEach(function(s){
       var c=document.createElement('div');
       c.style.cssText='flex:1;min-width:110px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow);';
