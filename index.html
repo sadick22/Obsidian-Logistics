@@ -467,7 +467,7 @@ This typically indicates that your device does not have a healthy Internet conne
     return result;
   }
 
-  // Driver wages from localStorage payments
+  // Driver wages from localStorage payments - exact category match
   function getWages(){
     try{
       var raw=localStorage.getItem('obsidian_logistics_data');
@@ -476,8 +476,10 @@ This typically indicates that your device does not have a healthy Internet conne
       var payments=Array.isArray(d.payments)?d.payments:[];
       var total=0;
       payments.forEach(function(p){
-        var cat=(p.category||'').toLowerCase();
-        if(cat.indexOf('driver')>-1||cat.indexOf('wage')>-1||cat.indexOf('salar')>-1){
+        var cat=(p.category||'');
+        // Match exact category "Driver Salaries/Wages" (case-insensitive)
+        var catLower=cat.toLowerCase();
+        if(catLower==='driver salaries/wages'||catLower.indexOf('driver salaries')>-1||catLower.indexOf('driver salary')>-1||catLower.indexOf('driver wage')>-1){
           total+=parseFloat(p.amount)||0;
         }
       });
