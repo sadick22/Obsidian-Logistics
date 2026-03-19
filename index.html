@@ -444,24 +444,20 @@ This typically indicates that your device does not have a healthy Internet conne
     },300);
   }
 
-  // Read drivers from ALL possible localStorage keys
   function getDrivers(){
     try{
       var raw=localStorage.getItem('obsidian_logistics_data');
-      if(raw){
-        var d=JSON.parse(raw);
-        if(d.drivers&&d.drivers.length)return d.drivers;
-      }
+      if(raw){var d=JSON.parse(raw);if(Array.isArray(d.drivers))return d.drivers;}
     }catch(e){}
     return[];
   }
 
-  function saveDriver(updatedDriver){
+  function saveDriver(updated){
     try{
       var raw=localStorage.getItem('obsidian_logistics_data');
       var d=raw?JSON.parse(raw):{};
       d.drivers=(d.drivers||[]).map(function(dr){
-        return dr.id===updatedDriver.id?updatedDriver:dr;
+        return String(dr.id)===String(updated.id)?updated:dr;
       });
       localStorage.setItem('obsidian_logistics_data',JSON.stringify(d));
     }catch(e){}
@@ -472,298 +468,277 @@ This typically indicates that your device does not have a healthy Internet conne
     return h&&(h.textContent||'').indexOf('Driver')>-1;
   }
 
-  // ------ Stats cards ------
+  // Pending uploads to attach to driver on save
+  var pendingDocs={};
+
+  // ------ Stats ------
   function renderStats(){
     if(!isDriversPage())return;
-    var old=document.getElementById('drv-stats2');
-    if(old)old.remove();
-
+    var old=document.getElementById('drv-stats4');if(old)old.remove();
     var drivers=getDrivers();
-
-    // Find the page content area - look for the card containing the table
-    var mainContent=document.querySelector('main');
-    if(!mainContent)return;
-
-    // Find the padding div
-    var paddingDiv=null;
-    var divs=mainContent.querySelectorAll('div');
+    var rows=document.querySelectorAll('table tbody tr');
+    var total=drivers.length||rows.length;
+    var active=0,onLeave=0,trips=0,earn=0;
+    drivers.forEach(function(d){
+      if(d.status==='Active')active++;
+      if(d.status==='On Leave')onLeave++;
+      trips+=parseInt(d.trips)||0;
+      earn+=parseFloat(d.earnings)||0;
+    });
+    var mainDiv=document.querySelector('main');if(!mainDiv)return;
+    var insertTarget=null;
+    var divs=mainDiv.querySelectorAll('div');
     for(var i=0;i<divs.length;i++){
-      var s=divs[i].style.cssText||'';
-      if(s.indexOf('24px 28px')>-1||s.indexOf('24px')>-1&&s.indexOf('28px')>-1){
-        paddingDiv=divs[i];break;
-      }
+      var css=divs[i].style.cssText||'';
+      if(css.indexOf('24px')>-1&&css.indexOf('28px')>-1&&divs[i].children.length>0){insertTarget=divs[i];break;}
     }
-    if(!paddingDiv)return;
-
-    var bar=document.createElement('div');
-    bar.id='drv-stats2';
+    if(!insertTarget)return;
+    var bar=document.createElement('div');bar.id='drv-stats4';
     bar.style.cssText='display:flex;gap:14px;margin-bottom:20px;flex-wrap:wrap;';
-
-    var active=drivers.filter(function(d){return d.status==='Active';}).length;
-    var onLeave=drivers.filter(function(d){return d.status==='On Leave';}).length;
-    var trips=drivers.reduce(function(s,d){return s+(parseInt(d.trips)||0);},0);
-    var earn=drivers.reduce(function(s,d){return s+(parseFloat(d.earnings)||0);},0);
-
-    [
-      {l:'Total Drivers',v:drivers.length,   c:'#4f46e5'},
-      {l:'Active',       v:active,           c:'#10b981'},
-      {l:'On Leave',     v:onLeave,          c:'#f59e0b'},
-      {l:'Total Trips',  v:trips,            c:'#3b82f6'},
-      {l:'Total Earnings',v:'GHS '+earn.toLocaleString(),c:'#10b981'},
-    ].forEach(function(s){
+    [{l:'Total Drivers',v:total,c:'#4f46e5'},{l:'Active',v:active,c:'#10b981'},{l:'On Leave',v:onLeave,c:'#f59e0b'},{l:'Total Trips',v:trips,c:'#3b82f6'},{l:'Total Earnings',v:'GHS '+earn.toLocaleString(),c:'#10b981'}].forEach(function(s){
       var c=document.createElement('div');
       c.style.cssText='flex:1;min-width:110px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow);';
-      c.innerHTML='<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);font-weight:500;">'+s.l+'</div>'
-        +'<div style="font-size:20px;font-weight:700;color:'+s.c+';margin-top:5px;">'+s.v+'</div>';
+      c.innerHTML='<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);font-weight:500;">'+s.l+'</div><div style="font-size:20px;font-weight:700;color:'+s.c+';margin-top:5px;">'+s.v+'</div>';
       bar.appendChild(c);
     });
-
-    paddingDiv.insertBefore(bar,paddingDiv.firstChild);
+    insertTarget.insertBefore(bar,insertTarget.firstChild);
   }
 
-  // ------ Enhance table: add ON-TIME, EARNINGS, DOCS columns ------
+  // ------ Table columns ------
   function enhanceTable(){
     if(!isDriversPage())return;
     var drivers=getDrivers();
-
     document.querySelectorAll('table').forEach(function(table){
       var ths=Array.from(table.querySelectorAll('thead th'));
       var hdrs=ths.map(function(t){return(t.textContent||'').trim().toUpperCase();});
       if(!hdrs.some(function(h){return h.indexOf('DRIVER')>-1;}))return;
-
-      var actIdx=ths.length-1; // ACTIONS is last
-      var actionsTh=ths[actIdx];
-
-      // Add headers once
+      var actTh=ths[ths.length-1];
       if(hdrs.indexOf('DOCS')===-1){
         ['ON-TIME','EARNINGS','DOCS'].forEach(function(label){
-          var th=document.createElement('th');
-          th.textContent=label;
+          var th=document.createElement('th');th.textContent=label;
           th.style.cssText='font-size:12px;font-weight:500;color:var(--text-muted);padding:10px 14px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;';
-          actionsTh.parentNode.insertBefore(th,actionsTh);
+          actTh.parentNode.insertBefore(th,actTh);
         });
       }
-
-      // Add cells to new rows only
       table.querySelectorAll('tbody tr').forEach(function(row){
-        if(row._drv)return;
-        row._drv=true;
-        var cells=row.querySelectorAll('td');
-        if(!cells.length)return;
-
-        // Find driver name - look in the row for bold text
+        if(row._drv)return;row._drv=true;
+        var cells=row.querySelectorAll('td');if(!cells.length)return;
         var name='';
-        var allDivs=row.querySelectorAll('div');
-        for(var i=0;i<allDivs.length;i++){
-          var el=allDivs[i];
-          if(el.children.length>0)continue;
+        var divs=row.querySelectorAll('div');
+        for(var i=0;i<divs.length;i++){
+          var el=divs[i];if(el.children.length>0)continue;
           var txt=(el.textContent||'').trim();
           var css=el.style.cssText||'';
-          // Name divs have font-weight:500 and reasonable length
-          if(txt.length>2&&txt.length<50&&css.indexOf('500')>-1&&txt.indexOf('@')===-1){
-            name=txt;break;
-          }
+          if(txt.length>2&&txt.length<50&&css.indexOf('500')>-1&&txt.indexOf('@')===-1){name=txt;break;}
         }
-
         var driver=null;
-        for(var j=0;j<drivers.length;j++){
-          if((drivers[j].name||'')==name){driver=drivers[j];break;}
-        }
-
+        for(var j=0;j<drivers.length;j++){if((drivers[j].name||'')==name){driver=drivers[j];break;}}
         var earnings=driver?parseFloat(driver.earnings)||0:0;
         var onTime=driver?parseFloat(driver.onTimeRate)||100:100;
         var onTimeColor=onTime>=90?'#10b981':onTime>=70?'#f59e0b':'#ef4444';
         var docKeys=['licenseDoc','idDoc','healthDoc','ghanaCardDoc','passportDoc'];
         var docCount=driver?docKeys.filter(function(k){return driver[k];}).length:0;
-
         var lastTd=cells[cells.length-1];
-
-        // DOCS cell
-        var tdDocs=document.createElement('td');
-        tdDocs.style.cssText='padding:12px 14px;cursor:pointer;';
-        tdDocs.innerHTML='<span style="font-size:12px;font-weight:600;color:'+(docCount>0?'#10b981':'var(--text-muted)')+';">'
-          +(docCount>0?'&#128196; '+docCount+' file'+(docCount>1?'s':''):'&#43; Add docs')+'</span>';
-        if(driver){
-          (function(drv){
-            tdDocs.onclick=function(e){e.stopPropagation();showDocsModal(drv);};
-          })(driver);
-        }
-        lastTd.parentNode.insertBefore(tdDocs,lastTd);
-
-        // EARNINGS cell
-        var tdEarn=document.createElement('td');
-        tdEarn.style.cssText='padding:12px 14px;font-size:14px;font-weight:600;color:#10b981;';
-        tdEarn.textContent='GHS '+earnings.toLocaleString();
-        lastTd.parentNode.insertBefore(tdEarn,lastTd);
-
-        // ON-TIME cell
-        var tdOT=document.createElement('td');
-        tdOT.style.cssText='padding:12px 14px;';
-        tdOT.innerHTML='<span style="font-weight:600;color:'+onTimeColor+';">'+onTime+'%</span>';
-        lastTd.parentNode.insertBefore(tdOT,lastTd);
+        var tdD=document.createElement('td');tdD.style.cssText='padding:12px 14px;cursor:pointer;';
+        tdD.innerHTML='<span style="font-size:12px;font-weight:600;color:'+(docCount>0?'#10b981':'var(--text-muted)')+';">'+(docCount>0?'&#128196; '+docCount+' doc'+(docCount>1?'s':''):'&#43; Docs')+'</span>';
+        if(driver)(function(drv){tdD.onclick=function(e){e.stopPropagation();showDocsModal(drv);};})(driver);
+        lastTd.parentNode.insertBefore(tdD,lastTd);
+        var tdE=document.createElement('td');tdE.style.cssText='padding:12px 14px;font-size:14px;font-weight:600;color:#10b981;';tdE.textContent='GHS '+earnings.toLocaleString();
+        lastTd.parentNode.insertBefore(tdE,lastTd);
+        var tdO=document.createElement('td');tdO.style.cssText='padding:12px 14px;';
+        tdO.innerHTML='<span style="font-weight:600;color:'+onTimeColor+';">'+onTime+'%</span>';
+        lastTd.parentNode.insertBefore(tdO,lastTd);
       });
     });
   }
 
-  // ------ Documents modal ------
+  // ------ Patch Add/Edit Driver form ------
   var DOC_TYPES=[
     {key:'licenseDoc',   label:"Driver's License"},
     {key:'idDoc',        label:'National ID'},
     {key:'healthDoc',    label:'Health Insurance Card'},
     {key:'ghanaCardDoc', label:'Ghana Card'},
-    {key:'passportDoc',  label:'Passport / Travel Docs'},
+    {key:'passportDoc',  label:'Passport'},
   ];
 
+  function patchForm(){
+    if(!isDriversPage())return;
+    var headings=document.querySelectorAll('h3');
+    var formCard=null;
+    headings.forEach(function(h){
+      if((h.textContent||'').indexOf('Driver')>-1)formCard=h.closest('[style]')||h.parentNode;
+    });
+    if(!formCard||formCard._patched)return;
+    formCard._patched=true;
+    var grid=formCard.querySelector('.form-grid');
+    if(!grid)return;
+
+    // ------ Extra performance fields ------
+    var perfWrap=document.createElement('div');
+    perfWrap.style.cssText='grid-column:1/-1;border-top:1px solid var(--border);padding-top:16px;margin-top:4px;';
+    perfWrap.innerHTML='<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Performance &amp; Contact</div>';
+    var perfGrid=document.createElement('div');perfGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:16px;';
+    [{label:'Phone Number',key:'xphone',type:'text'},{label:'License Number',key:'xlicense',type:'text'},{label:'Total Earnings (GHS)',key:'xearnings',type:'number'},{label:'On-Time Rate (%)',key:'xontime',type:'number'}].forEach(function(f){
+      var w=document.createElement('div');
+      var lb=document.createElement('label');lb.style.cssText='font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:5px;';lb.textContent=f.label;
+      var ip=document.createElement('input');ip.type=f.type;ip.id=f.key;ip.placeholder=f.label;
+      ip.style.cssText='width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text-primary);outline:none;box-sizing:border-box;font-family:inherit;';
+      w.appendChild(lb);w.appendChild(ip);perfGrid.appendChild(w);
+    });
+    perfWrap.appendChild(perfGrid);
+    grid.appendChild(perfWrap);
+
+    // ------ Document upload fields ------
+    var docsWrap=document.createElement('div');
+    docsWrap.style.cssText='grid-column:1/-1;border-top:1px solid var(--border);padding-top:16px;margin-top:4px;';
+    docsWrap.innerHTML='<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Upload Documents</div>';
+    var docsGrid=document.createElement('div');docsGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:12px;';
+
+    DOC_TYPES.forEach(function(doc){
+      var w=document.createElement('div');
+      var lb=document.createElement('label');lb.style.cssText='font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:5px;';lb.textContent=doc.label;
+      var uploadBox=document.createElement('div');
+      uploadBox.id='upload-box-'+doc.key;
+      uploadBox.style.cssText='border:1.5px dashed var(--border);border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;background:var(--surface2);cursor:pointer;transition:border-color 0.2s;';
+      uploadBox.innerHTML='<span id="upload-label-'+doc.key+'" style="font-size:13px;color:var(--text-muted);">Click to upload (PDF/Image)</span><span style="font-size:16px;">&#128196;</span>';
+      var fi=document.createElement('input');fi.type='file';fi.accept='image/*,.pdf';fi.style.display='none';fi.id='upload-input-'+doc.key;
+      uploadBox.onmouseenter=function(){uploadBox.style.borderColor='#c8a86e';};
+      uploadBox.onmouseleave=function(){if(!pendingDocs[doc.key])uploadBox.style.borderColor='var(--border)';};
+      uploadBox.onclick=function(){fi.click();};
+      fi.onchange=function(){
+        var file=fi.files[0];if(!file)return;
+        if(file.size>2097152){alert('Max file size is 2MB. Please compress the file.');return;}
+        var reader=new FileReader();
+        reader.onload=function(ev){
+          pendingDocs[doc.key]={data:ev.target.result,name:file.name};
+          var lbl=document.getElementById('upload-label-'+doc.key);
+          if(lbl){lbl.style.color='#10b981';lbl.textContent='&#10003; '+file.name;}
+          uploadBox.style.borderColor='#10b981';
+        };
+        reader.readAsDataURL(file);
+      };
+      w.appendChild(lb);w.appendChild(uploadBox);w.appendChild(fi);docsGrid.appendChild(w);
+    });
+    docsWrap.appendChild(docsGrid);
+    grid.appendChild(docsWrap);
+
+    // ------ Intercept save button ------
+    var saveBtn=formCard.querySelector('button.btn-gold');
+    if(saveBtn&&!saveBtn._docPatched){
+      saveBtn._docPatched=true;
+      saveBtn.addEventListener('click',function(){
+        setTimeout(function(){
+          var drivers=getDrivers();
+          if(!drivers.length)return;
+          var newest=drivers[drivers.length-1];
+          // Attach extra fields
+          var phone=document.getElementById('xphone');var license=document.getElementById('xlicense');
+          var earn=document.getElementById('xearnings');var ontime=document.getElementById('xontime');
+          if(phone&&phone.value)newest.phone=phone.value;
+          if(license&&license.value)newest.license=license.value;
+          if(earn&&earn.value)newest.earnings=earn.value;
+          if(ontime&&ontime.value)newest.onTimeRate=ontime.value;
+          // Attach pending docs
+          Object.keys(pendingDocs).forEach(function(k){
+            newest[k]=pendingDocs[k].data;
+            newest[k+'Name']=pendingDocs[k].name;
+          });
+          saveDriver(newest);
+          // Clear pending
+          pendingDocs={};
+          DOC_TYPES.forEach(function(doc){
+            var lbl=document.getElementById('upload-label-'+doc.key);
+            if(lbl){lbl.style.color='var(--text-muted)';lbl.textContent='Click to upload (PDF/Image)';}
+            var box=document.getElementById('upload-box-'+doc.key);
+            if(box)box.style.borderColor='var(--border)';
+            var inp=document.getElementById('upload-input-'+doc.key);
+            if(inp)inp.value='';
+          });
+        },600);
+      });
+    }
+  }
+
+  // ------ Docs modal ------
   function showDocsModal(driver){
-    var existing=document.getElementById('docs-modal');
-    if(existing)existing.remove();
-
-    var overlay=document.createElement('div');
-    overlay.id='docs-modal';
-    overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;';
-    overlay.onclick=function(e){if(e.target===overlay)overlay.remove();};
-
+    var ex=document.getElementById('docs-modal');if(ex)ex.remove();
+    var ov=document.createElement('div');
+    ov.id='docs-modal';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;';
+    ov.onclick=function(e){if(e.target===ov)ov.remove();};
     var box=document.createElement('div');
     box.style.cssText='background:var(--surface);border-radius:16px;padding:28px;width:100%;max-width:540px;max-height:88vh;overflow-y:auto;box-shadow:0 8px 40px rgba(139,92,246,0.25);';
     box.onclick=function(e){e.stopPropagation();};
-
-    // Header
     box.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">'
       +'<div><div style="font-weight:700;font-size:17px;color:var(--text-primary);">'+driver.name+'</div>'
-      +'<div style="font-size:13px;color:var(--text-muted);margin-top:2px;">'+(driver.role||driver.status||'Driver')+' - Documents &amp; Performance</div></div>'
-      +'<button id="close-docs-modal" style="width:32px;height:32px;border:1px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;color:var(--text-secondary);font-size:16px;">&#10005;</button>'
-      +'</div>';
-
-    // Documents section
-    var docsSection=document.createElement('div');
-    docsSection.style.cssText='margin-bottom:24px;';
-    docsSection.innerHTML='<div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Documents</div>';
+      +'<div style="font-size:13px;color:var(--text-muted);margin-top:2px;">Documents &amp; Performance</div></div>'
+      +'<button id="cls-docs" style="width:32px;height:32px;border:1px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;color:var(--text-secondary);font-size:16px;">&#10005;</button></div>'
+      +'<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Documents</div>';
 
     DOC_TYPES.forEach(function(doc){
       var row=document.createElement('div');
       row.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface2);border-radius:10px;border:1px solid var(--border);margin-bottom:8px;';
-
       var hasDoc=!!driver[doc.key];
-      row.innerHTML='<div>'
-        +'<div style="font-weight:500;font-size:13px;color:var(--text-primary);">'+doc.label+'</div>'
-        +'<div style="font-size:11px;color:'+(hasDoc?'#10b981':'var(--text-muted)')+';">'+(hasDoc?'&#10003; Uploaded':'Not uploaded yet')+'</div>'
-        +'</div>';
-
-      var btns=document.createElement('div');
-      btns.style.cssText='display:flex;gap:6px;';
-
-      var fileInput=document.createElement('input');
-      fileInput.type='file';
-      fileInput.accept='image/*,.pdf';
-      fileInput.style.display='none';
-
-      var uploadBtn=document.createElement('button');
-      uploadBtn.style.cssText='padding:5px 11px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap;';
-      uploadBtn.textContent=hasDoc?'Replace':'Upload';
-
-      (function(d, fi, ub){
-        fi.onchange=function(){
-          var file=fi.files[0];
-          if(!file)return;
-          // Check file size (max 2MB)
-          if(file.size>2*1024*1024){alert('File too large. Max 2MB.');return;}
+      row.innerHTML='<div><div style="font-weight:500;font-size:13px;color:var(--text-primary);">'+doc.label+'</div>'
+        +'<div style="font-size:11px;color:'+(hasDoc?'#10b981':'var(--text-muted)')+';">'+(hasDoc?'&#10003; '+( driver[doc.key+'Name']||'Uploaded'):'Not uploaded')+'</div></div>';
+      var btns=document.createElement('div');btns.style.cssText='display:flex;gap:6px;';
+      var fi=document.createElement('input');fi.type='file';fi.accept='image/*,.pdf';fi.style.display='none';
+      var ub=document.createElement('button');
+      ub.style.cssText='padding:5px 11px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;font-family:inherit;';
+      ub.textContent=hasDoc?'Replace':'Upload';
+      (function(d,inp,btn){
+        inp.onchange=function(){
+          var file=inp.files[0];if(!file)return;
+          if(file.size>2097152){alert('Max 2MB');return;}
           var reader=new FileReader();
           reader.onload=function(ev){
-            driver[d.key]=ev.target.result;
-            driver[d.key+'Name']=file.name;
-            saveDriver(driver);
-            overlay.remove();
-            setTimeout(function(){showDocsModal(driver);},200);
-          };
-          reader.readAsDataURL(file);
-        };
-        ub.onclick=function(){fi.click();};
-      })(doc, fileInput, uploadBtn);
-
-      btns.appendChild(fileInput);
-      btns.appendChild(uploadBtn);
-
+            driver[d.key]=ev.target.result;driver[d.key+'Name']=file.name;
+            saveDriver(driver);ov.remove();
+            setTimeout(function(){showDocsModal(driver);},150);
+          };reader.readAsDataURL(file);
+        };btn.onclick=function(){inp.click();};
+      })(doc,fi,ub);
+      btns.appendChild(fi);btns.appendChild(ub);
       if(hasDoc){
-        var dlBtn=document.createElement('a');
-        dlBtn.href=driver[doc.key];
-        dlBtn.download=driver[doc.key+'Name']||doc.label;
-        dlBtn.style.cssText='padding:5px 11px;border:1px solid #3b82f6;border-radius:6px;color:#3b82f6;font-size:12px;cursor:pointer;text-decoration:none;white-space:nowrap;';
-        dlBtn.textContent='Download';
-        btns.appendChild(dlBtn);
-
-        var delBtn=document.createElement('button');
-        delBtn.style.cssText='padding:5px 10px;border:1px solid rgba(239,68,68,0.4);border-radius:6px;background:transparent;color:#ef4444;font-size:12px;cursor:pointer;';
-        delBtn.innerHTML='&#128465;';
-        (function(d){
-          delBtn.onclick=function(){
-            if(!confirm('Remove this document?'))return;
-            delete driver[d.key];
-            delete driver[d.key+'Name'];
-            saveDriver(driver);
-            overlay.remove();
-            setTimeout(function(){showDocsModal(driver);},200);
-          };
-        })(doc);
-        btns.appendChild(delBtn);
+        var dl=document.createElement('a');
+        dl.href=driver[doc.key];dl.download=driver[doc.key+'Name']||doc.label;
+        dl.style.cssText='padding:5px 11px;border:1px solid #3b82f6;border-radius:6px;color:#3b82f6;font-size:12px;text-decoration:none;white-space:nowrap;';
+        dl.textContent='Download';btns.appendChild(dl);
+        var db=document.createElement('button');
+        db.style.cssText='padding:5px 10px;border:1px solid rgba(239,68,68,0.4);border-radius:6px;background:transparent;color:#ef4444;font-size:12px;cursor:pointer;';
+        db.innerHTML='&#128465;';
+        (function(d){db.onclick=function(){if(!confirm('Remove this document?'))return;delete driver[d.key];delete driver[d.key+'Name'];saveDriver(driver);ov.remove();setTimeout(function(){showDocsModal(driver);},150);};})(doc);
+        btns.appendChild(db);
       }
-
-      row.appendChild(btns);
-      docsSection.appendChild(row);
+      row.appendChild(btns);box.appendChild(row);
     });
 
-    // Performance & extras edit section
-    var perfSection=document.createElement('div');
-    perfSection.innerHTML='<div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Performance &amp; Info</div>';
-
-    var grid=document.createElement('div');
-    grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;';
-
-    var fields=[
-      {key:'earnings',   label:'Total Earnings (GHS)',type:'number'},
-      {key:'onTimeRate', label:'On-Time Rate (%)',    type:'number'},
-      {key:'phone',      label:'Phone Number',        type:'text'},
-      {key:'license',    label:'License Number',      type:'text'},
-    ];
-
-    var inputs={};
-    fields.forEach(function(f){
-      var wrap=document.createElement('div');
-      var lbl=document.createElement('label');
-      lbl.style.cssText='font-size:12px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:4px;';
-      lbl.textContent=f.label;
-      var inp=document.createElement('input');
-      inp.type=f.type;
-      inp.value=driver[f.key]||'';
-      inp.style.cssText='width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-primary);font-size:13px;font-family:inherit;box-sizing:border-box;';
-      inputs[f.key]=inp;
-      wrap.appendChild(lbl);
-      wrap.appendChild(inp);
-      grid.appendChild(wrap);
+    // Performance edit
+    var perf=document.createElement('div');
+    perf.style.cssText='margin-top:20px;border-top:1px solid var(--border);padding-top:16px;';
+    perf.innerHTML='<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Performance &amp; Info</div>';
+    var g=document.createElement('div');g.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;';
+    var inps={};
+    [{key:'earnings',l:'Earnings (GHS)',t:'number'},{key:'onTimeRate',l:'On-Time (%)',t:'number'},{key:'phone',l:'Phone',t:'text'},{key:'license',l:'License No.',t:'text'}].forEach(function(f){
+      var w=document.createElement('div');
+      var lb=document.createElement('label');lb.style.cssText='font-size:12px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:4px;';lb.textContent=f.l;
+      var ip=document.createElement('input');ip.type=f.t;ip.value=driver[f.key]||'';
+      ip.style.cssText='width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-primary);font-size:13px;font-family:inherit;box-sizing:border-box;';
+      inps[f.key]=ip;w.appendChild(lb);w.appendChild(ip);g.appendChild(w);
     });
-
-    var saveBtn=document.createElement('button');
-    saveBtn.style.cssText='width:100%;padding:11px;background:#c8a86e;border:none;border-radius:10px;color:#1c1c1e;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;transition:all 0.2s;';
-    saveBtn.textContent='Save Changes';
-    saveBtn.onclick=function(){
-      fields.forEach(function(f){driver[f.key]=inputs[f.key].value;});
-      saveDriver(driver);
-      saveBtn.textContent='Saved! &#10003;';
-      saveBtn.style.background='#10b981';
-      saveBtn.style.color='#fff';
-      setTimeout(function(){overlay.remove();},900);
+    var sb=document.createElement('button');
+    sb.style.cssText='width:100%;padding:11px;background:#c8a86e;border:none;border-radius:10px;color:#1c1c1e;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;';
+    sb.textContent='Save Changes';
+    sb.onclick=function(){
+      Object.keys(inps).forEach(function(k){driver[k]=inps[k].value;});
+      saveDriver(driver);sb.textContent='Saved!';sb.style.background='#10b981';sb.style.color='#fff';
+      setTimeout(function(){ov.remove();},800);
     };
-
-    perfSection.appendChild(grid);
-    perfSection.appendChild(saveBtn);
-
-    box.appendChild(docsSection);
-    box.appendChild(perfSection);
-    overlay.appendChild(box);
-    document.body.appendChild(overlay);
-    document.getElementById('close-docs-modal').onclick=function(){overlay.remove();};
+    perf.appendChild(g);perf.appendChild(sb);box.appendChild(perf);
+    ov.appendChild(box);document.body.appendChild(ov);
+    document.getElementById('cls-docs').onclick=function(){ov.remove();};
   }
 
-  // ------ Main runner ------
   wait(function(){
     var _t=null;
     new MutationObserver(function(){
@@ -771,11 +746,10 @@ This typically indicates that your device does not have a healthy Internet conne
       _t=setTimeout(function(){
         renderStats();
         enhanceTable();
+        patchForm();
       },500);
     }).observe(document.body,{childList:true,subtree:true});
-    renderStats();
-    enhanceTable();
+    renderStats();enhanceTable();patchForm();
   });
-
 })();
 </script>
