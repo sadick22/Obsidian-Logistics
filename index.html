@@ -444,21 +444,19 @@ This typically indicates that your device does not have a healthy Internet conne
     },300);
   }
 
+  function getData(){
+    try{var raw=localStorage.getItem('obsidian_logistics_data');return raw?JSON.parse(raw):{};}catch(e){return{};}
+  }
+
   function getDrivers(){
-    try{
-      var raw=localStorage.getItem('obsidian_logistics_data');
-      if(raw){var d=JSON.parse(raw);if(Array.isArray(d.drivers))return d.drivers;}
-    }catch(e){}
-    return[];
+    var d=getData();return Array.isArray(d.drivers)?d.drivers:[];
   }
 
   function saveDriver(updated){
     try{
       var raw=localStorage.getItem('obsidian_logistics_data');
       var d=raw?JSON.parse(raw):{};
-      d.drivers=(d.drivers||[]).map(function(dr){
-        return String(dr.id)===String(updated.id)?updated:dr;
-      });
+      d.drivers=(d.drivers||[]).map(function(dr){return String(dr.id)===String(updated.id)?updated:dr;});
       localStorage.setItem('obsidian_logistics_data',JSON.stringify(d));
     }catch(e){}
   }
@@ -468,23 +466,37 @@ This typically indicates that your device does not have a healthy Internet conne
     return h&&(h.textContent||'').indexOf('Driver')>-1;
   }
 
-  // Pending uploads to attach to driver on save
-  var pendingDocs={};
-
-  // ------ Stats ------
+  // ------ 1. Stats cards (5 cards as requested) ------
   function renderStats(){
     if(!isDriversPage())return;
-    var old=document.getElementById('drv-stats4');if(old)old.remove();
-    var drivers=getDrivers();
-    var rows=document.querySelectorAll('table tbody tr');
-    var total=drivers.length||rows.length;
-    var active=0,onLeave=0,trips=0,earn=0;
-    drivers.forEach(function(d){
-      if(d.status==='Active')active++;
-      if(d.status==='On Leave')onLeave++;
-      trips+=parseInt(d.trips)||0;
-      earn+=parseFloat(d.earnings)||0;
+    var old=document.getElementById('drv-stats5');if(old)old.remove();
+
+    var d=getData();
+    var drivers=Array.isArray(d.drivers)?d.drivers:[];
+    var payments=Array.isArray(d.payments)?d.payments:[];
+
+    // Count from table rows if localStorage shows 0
+    var tableRows=document.querySelectorAll('table tbody tr');
+    var total=drivers.length||tableRows.length;
+
+    // Car numbers from drivers
+    var cars=drivers.map(function(dr){return dr.carNumber||'';}).filter(Boolean);
+    var carDisplay=cars.length===1?cars[0]:(cars.length>1?cars.length+' cars':'---');
+
+    // Total trips from drivers table
+    var totalTrips=drivers.reduce(function(s,dr){return s+(parseInt(dr.trips)||0);},0);
+
+    // Trucks assigned
+    var trucks=drivers.map(function(dr){return dr.truck||'';}).filter(Boolean);
+    var truckDisplay=trucks.length===1?trucks[0]:(trucks.length>1?trucks.length+' trucks':'---');
+
+    // Total earnings: from payments where category = Driver Salaries/Wages
+    var wagePayments=payments.filter(function(p){
+      return(p.category||'').toLowerCase().indexOf('driver')>-1||(p.category||'').toLowerCase().indexOf('wage')>-1||(p.category||'').toLowerCase().indexOf('salar')>-1;
     });
+    var totalEarn=wagePayments.reduce(function(s,p){return s+(parseFloat(p.amount)||0);},0);
+
+    // Find insertion point
     var mainDiv=document.querySelector('main');if(!mainDiv)return;
     var insertTarget=null;
     var divs=mainDiv.querySelectorAll('div');
@@ -493,18 +505,29 @@ This typically indicates that your device does not have a healthy Internet conne
       if(css.indexOf('24px')>-1&&css.indexOf('28px')>-1&&divs[i].children.length>0){insertTarget=divs[i];break;}
     }
     if(!insertTarget)return;
-    var bar=document.createElement('div');bar.id='drv-stats4';
+
+    var bar=document.createElement('div');
+    bar.id='drv-stats5';
     bar.style.cssText='display:flex;gap:14px;margin-bottom:20px;flex-wrap:wrap;';
-    [{l:'Total Drivers',v:total,c:'#4f46e5'},{l:'Active',v:active,c:'#10b981'},{l:'On Leave',v:onLeave,c:'#f59e0b'},{l:'Total Trips',v:trips,c:'#3b82f6'},{l:'Total Earnings',v:'GHS '+earn.toLocaleString(),c:'#10b981'}].forEach(function(s){
+
+    [
+      {l:'Total Drivers', v:total,        c:'#4f46e5', sub:'registered'},
+      {l:'Car Number',    v:carDisplay,   c:'var(--text-primary)', sub:cars.length+' assigned'},
+      {l:'Total Trips',   v:totalTrips,   c:'#3b82f6', sub:'all drivers'},
+      {l:'Truck',         v:truckDisplay, c:'var(--text-primary)', sub:trucks.length+' assigned'},
+      {l:'Driver Wages',  v:'GHS '+totalEarn.toLocaleString(), c:'#10b981', sub:'from payments'},
+    ].forEach(function(s){
       var c=document.createElement('div');
       c.style.cssText='flex:1;min-width:110px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow);';
-      c.innerHTML='<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);font-weight:500;">'+s.l+'</div><div style="font-size:20px;font-weight:700;color:'+s.c+';margin-top:5px;">'+s.v+'</div>';
+      c.innerHTML='<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);font-weight:500;margin-bottom:5px;">'+s.l+'</div>'
+        +'<div style="font-size:18px;font-weight:700;color:'+s.c+';line-height:1.2;">'+s.v+'</div>'
+        +'<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">'+s.sub+'</div>';
       bar.appendChild(c);
     });
     insertTarget.insertBefore(bar,insertTarget.firstChild);
   }
 
-  // ------ Table columns ------
+  // ------ 2. Table columns ------
   function enhanceTable(){
     if(!isDriversPage())return;
     var drivers=getDrivers();
@@ -536,8 +559,7 @@ This typically indicates that your device does not have a healthy Internet conne
         var earnings=driver?parseFloat(driver.earnings)||0:0;
         var onTime=driver?parseFloat(driver.onTimeRate)||100:100;
         var onTimeColor=onTime>=90?'#10b981':onTime>=70?'#f59e0b':'#ef4444';
-        var docKeys=['licenseDoc','idDoc','healthDoc','ghanaCardDoc','passportDoc'];
-        var docCount=driver?docKeys.filter(function(k){return driver[k];}).length:0;
+        var docCount=driver?['licenseDoc','idDoc','healthDoc','ghanaCardDoc','passportDoc'].filter(function(k){return driver[k];}).length:0;
         var lastTd=cells[cells.length-1];
         var tdD=document.createElement('td');tdD.style.cssText='padding:12px 14px;cursor:pointer;';
         tdD.innerHTML='<span style="font-size:12px;font-weight:600;color:'+(docCount>0?'#10b981':'var(--text-muted)')+';">'+(docCount>0?'&#128196; '+docCount+' doc'+(docCount>1?'s':''):'&#43; Docs')+'</span>';
@@ -552,7 +574,8 @@ This typically indicates that your device does not have a healthy Internet conne
     });
   }
 
-  // ------ Patch Add/Edit Driver form ------
+  // ------ 3. Patch form - more robust finder ------
+  var pendingDocs={};
   var DOC_TYPES=[
     {key:'licenseDoc',   label:"Driver's License"},
     {key:'idDoc',        label:'National ID'},
@@ -563,103 +586,138 @@ This typically indicates that your device does not have a healthy Internet conne
 
   function patchForm(){
     if(!isDriversPage())return;
-    var headings=document.querySelectorAll('h3');
-    var formCard=null;
-    headings.forEach(function(h){
-      if((h.textContent||'').indexOf('Driver')>-1)formCard=h.closest('[style]')||h.parentNode;
-    });
-    if(!formCard||formCard._patched)return;
-    formCard._patched=true;
-    var grid=formCard.querySelector('.form-grid');
+    if(document.getElementById('drv-extra-fields'))return;
+
+    // Find form by looking for the Add Driver heading
+    var allH3=document.querySelectorAll('h3');
+    var formContainer=null;
+    for(var i=0;i<allH3.length;i++){
+      var txt=(allH3[i].textContent||'').trim();
+      if(txt.indexOf('Add')>-1||txt.indexOf('Edit')>-1){
+        // Walk up to find the card container
+        var el=allH3[i];
+        for(var j=0;j<8;j++){
+          if(!el.parentElement)break;
+          el=el.parentElement;
+          var style=el.style.cssText||'';
+          if(style.indexOf('padding')>-1&&style.indexOf('border')>-1){formContainer=el;break;}
+        }
+        break;
+      }
+    }
+
+    if(!formContainer)return;
+
+    // Find the form-grid
+    var grid=formContainer.querySelector('.form-grid');
     if(!grid)return;
 
-    // ------ Extra performance fields ------
-    var perfWrap=document.createElement('div');
-    perfWrap.style.cssText='grid-column:1/-1;border-top:1px solid var(--border);padding-top:16px;margin-top:4px;';
-    perfWrap.innerHTML='<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Performance &amp; Contact</div>';
-    var perfGrid=document.createElement('div');perfGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:16px;';
-    [{label:'Phone Number',key:'xphone',type:'text'},{label:'License Number',key:'xlicense',type:'text'},{label:'Total Earnings (GHS)',key:'xearnings',type:'number'},{label:'On-Time Rate (%)',key:'xontime',type:'number'}].forEach(function(f){
+    // Build our extra section
+    var extraWrap=document.createElement('div');
+    extraWrap.id='drv-extra-fields';
+    extraWrap.style.cssText='grid-column:1/-1;';
+
+    // Performance fields
+    var perfDiv=document.createElement('div');
+    perfDiv.style.cssText='border-top:1px solid var(--border);padding-top:16px;margin-top:8px;margin-bottom:16px;';
+    perfDiv.innerHTML='<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Performance &amp; Contact</div>';
+    var perfGrid=document.createElement('div');
+    perfGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:14px;';
+    [{k:'xphone',l:'Phone Number',t:'text'},{k:'xlicense',l:'License Number',t:'text'},{k:'xearnings',l:'Total Earnings (GHS)',t:'number'},{k:'xontime',l:'On-Time Rate (%)',t:'number'}].forEach(function(f){
       var w=document.createElement('div');
-      var lb=document.createElement('label');lb.style.cssText='font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:5px;';lb.textContent=f.label;
-      var ip=document.createElement('input');ip.type=f.type;ip.id=f.key;ip.placeholder=f.label;
+      var lb=document.createElement('label');lb.style.cssText='font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:5px;';lb.textContent=f.l;
+      var ip=document.createElement('input');ip.type=f.t;ip.id=f.k;ip.placeholder=f.l;
       ip.style.cssText='width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text-primary);outline:none;box-sizing:border-box;font-family:inherit;';
+      ip.onfocus=function(){ip.style.borderColor='#c8a86e';ip.style.boxShadow='0 0 0 3px rgba(200,168,110,0.15)';};
+      ip.onblur=function(){ip.style.borderColor='var(--border)';ip.style.boxShadow='none';};
       w.appendChild(lb);w.appendChild(ip);perfGrid.appendChild(w);
     });
-    perfWrap.appendChild(perfGrid);
-    grid.appendChild(perfWrap);
+    perfDiv.appendChild(perfGrid);
 
-    // ------ Document upload fields ------
-    var docsWrap=document.createElement('div');
-    docsWrap.style.cssText='grid-column:1/-1;border-top:1px solid var(--border);padding-top:16px;margin-top:4px;';
-    docsWrap.innerHTML='<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Upload Documents</div>';
-    var docsGrid=document.createElement('div');docsGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:12px;';
+    // Document upload fields
+    var docsDiv=document.createElement('div');
+    docsDiv.style.cssText='border-top:1px solid var(--border);padding-top:16px;';
+    docsDiv.innerHTML='<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Upload Documents</div>';
+    var docsGrid=document.createElement('div');
+    docsGrid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:12px;';
 
     DOC_TYPES.forEach(function(doc){
       var w=document.createElement('div');
-      var lb=document.createElement('label');lb.style.cssText='font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:5px;';lb.textContent=doc.label;
-      var uploadBox=document.createElement('div');
-      uploadBox.id='upload-box-'+doc.key;
-      uploadBox.style.cssText='border:1.5px dashed var(--border);border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;background:var(--surface2);cursor:pointer;transition:border-color 0.2s;';
-      uploadBox.innerHTML='<span id="upload-label-'+doc.key+'" style="font-size:13px;color:var(--text-muted);">Click to upload (PDF/Image)</span><span style="font-size:16px;">&#128196;</span>';
-      var fi=document.createElement('input');fi.type='file';fi.accept='image/*,.pdf';fi.style.display='none';fi.id='upload-input-'+doc.key;
-      uploadBox.onmouseenter=function(){uploadBox.style.borderColor='#c8a86e';};
-      uploadBox.onmouseleave=function(){if(!pendingDocs[doc.key])uploadBox.style.borderColor='var(--border)';};
-      uploadBox.onclick=function(){fi.click();};
-      fi.onchange=function(){
-        var file=fi.files[0];if(!file)return;
-        if(file.size>2097152){alert('Max file size is 2MB. Please compress the file.');return;}
-        var reader=new FileReader();
-        reader.onload=function(ev){
-          pendingDocs[doc.key]={data:ev.target.result,name:file.name};
-          var lbl=document.getElementById('upload-label-'+doc.key);
-          if(lbl){lbl.style.color='#10b981';lbl.textContent='&#10003; '+file.name;}
-          uploadBox.style.borderColor='#10b981';
-        };
-        reader.readAsDataURL(file);
-      };
-      w.appendChild(lb);w.appendChild(uploadBox);w.appendChild(fi);docsGrid.appendChild(w);
-    });
-    docsWrap.appendChild(docsGrid);
-    grid.appendChild(docsWrap);
+      var lb=document.createElement('label');
+      lb.style.cssText='font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:6px;';
+      lb.textContent=doc.label;
 
-    // ------ Intercept save button ------
-    var saveBtn=formCard.querySelector('button.btn-gold');
-    if(saveBtn&&!saveBtn._docPatched){
-      saveBtn._docPatched=true;
+      var box=document.createElement('div');
+      box.style.cssText='border:1.5px dashed var(--border);border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;background:var(--surface2);cursor:pointer;transition:border-color 0.2s;';
+
+      var span=document.createElement('span');
+      span.id='dlbl-'+doc.key;
+      span.style.cssText='font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;';
+      span.textContent='Click to upload PDF or image';
+
+      var icon=document.createElement('span');icon.style.cssText='font-size:16px;flex-shrink:0;margin-left:8px;';icon.textContent='----';
+
+      var fi=document.createElement('input');fi.type='file';fi.accept='image/*,.pdf';fi.style.display='none';
+
+      box.appendChild(span);box.appendChild(icon);box.appendChild(fi);
+
+      box.onmouseenter=function(){if(!pendingDocs[doc.key])box.style.borderColor='#c8a86e';};
+      box.onmouseleave=function(){if(!pendingDocs[doc.key])box.style.borderColor='var(--border)';};
+      box.onclick=function(){fi.click();};
+
+      (function(d,input,sp,bx){
+        input.onchange=function(){
+          var file=input.files[0];if(!file)return;
+          if(file.size>2097152){alert('Max file size is 2MB');return;}
+          var reader=new FileReader();
+          reader.onload=function(ev){
+            pendingDocs[d.key]={data:ev.target.result,name:file.name};
+            sp.textContent='--- '+file.name;
+            sp.style.color='#10b981';
+            bx.style.borderColor='#10b981';
+            bx.style.background='rgba(16,185,129,0.05)';
+          };
+          reader.readAsDataURL(file);
+        };
+      })(doc,fi,span,box);
+
+      w.appendChild(lb);w.appendChild(box);docsGrid.appendChild(w);
+    });
+    docsDiv.appendChild(docsGrid);
+
+    extraWrap.appendChild(perfDiv);
+    extraWrap.appendChild(docsDiv);
+    grid.appendChild(extraWrap);
+
+    // Intercept save
+    var saveBtn=formContainer.querySelector('button.btn-gold');
+    if(saveBtn&&!saveBtn._docSave){
+      saveBtn._docSave=true;
       saveBtn.addEventListener('click',function(){
         setTimeout(function(){
           var drivers=getDrivers();
           if(!drivers.length)return;
           var newest=drivers[drivers.length-1];
-          // Attach extra fields
-          var phone=document.getElementById('xphone');var license=document.getElementById('xlicense');
-          var earn=document.getElementById('xearnings');var ontime=document.getElementById('xontime');
-          if(phone&&phone.value)newest.phone=phone.value;
-          if(license&&license.value)newest.license=license.value;
-          if(earn&&earn.value)newest.earnings=earn.value;
-          if(ontime&&ontime.value)newest.onTimeRate=ontime.value;
-          // Attach pending docs
+          var ph=document.getElementById('xphone');
+          var li=document.getElementById('xlicense');
+          var ea=document.getElementById('xearnings');
+          var ot=document.getElementById('xontime');
+          if(ph&&ph.value)newest.phone=ph.value;
+          if(li&&li.value)newest.license=li.value;
+          if(ea&&ea.value)newest.earnings=ea.value;
+          if(ot&&ot.value)newest.onTimeRate=ot.value;
           Object.keys(pendingDocs).forEach(function(k){
             newest[k]=pendingDocs[k].data;
             newest[k+'Name']=pendingDocs[k].name;
           });
           saveDriver(newest);
-          // Clear pending
           pendingDocs={};
-          DOC_TYPES.forEach(function(doc){
-            var lbl=document.getElementById('upload-label-'+doc.key);
-            if(lbl){lbl.style.color='var(--text-muted)';lbl.textContent='Click to upload (PDF/Image)';}
-            var box=document.getElementById('upload-box-'+doc.key);
-            if(box)box.style.borderColor='var(--border)';
-            var inp=document.getElementById('upload-input-'+doc.key);
-            if(inp)inp.value='';
-          });
-        },600);
+        },700);
       });
     }
   }
 
-  // ------ Docs modal ------
+  // ------ 4. Docs modal ------
   function showDocsModal(driver){
     var ex=document.getElementById('docs-modal');if(ex)ex.remove();
     var ov=document.createElement('div');
@@ -674,13 +732,13 @@ This typically indicates that your device does not have a healthy Internet conne
       +'<div style="font-size:13px;color:var(--text-muted);margin-top:2px;">Documents &amp; Performance</div></div>'
       +'<button id="cls-docs" style="width:32px;height:32px;border:1px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;color:var(--text-secondary);font-size:16px;">&#10005;</button></div>'
       +'<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Documents</div>';
-
     DOC_TYPES.forEach(function(doc){
       var row=document.createElement('div');
       row.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface2);border-radius:10px;border:1px solid var(--border);margin-bottom:8px;';
       var hasDoc=!!driver[doc.key];
+      var docName=driver[doc.key+'Name']||'Uploaded';
       row.innerHTML='<div><div style="font-weight:500;font-size:13px;color:var(--text-primary);">'+doc.label+'</div>'
-        +'<div style="font-size:11px;color:'+(hasDoc?'#10b981':'var(--text-muted)')+';">'+(hasDoc?'&#10003; '+( driver[doc.key+'Name']||'Uploaded'):'Not uploaded')+'</div></div>';
+        +'<div style="font-size:11px;color:'+(hasDoc?'#10b981':'var(--text-muted)')+';">'+(hasDoc?'&#10003; '+docName:'Not uploaded')+'</div></div>';
       var btns=document.createElement('div');btns.style.cssText='display:flex;gap:6px;';
       var fi=document.createElement('input');fi.type='file';fi.accept='image/*,.pdf';fi.style.display='none';
       var ub=document.createElement('button');
@@ -693,8 +751,7 @@ This typically indicates that your device does not have a healthy Internet conne
           var reader=new FileReader();
           reader.onload=function(ev){
             driver[d.key]=ev.target.result;driver[d.key+'Name']=file.name;
-            saveDriver(driver);ov.remove();
-            setTimeout(function(){showDocsModal(driver);},150);
+            saveDriver(driver);ov.remove();setTimeout(function(){showDocsModal(driver);},150);
           };reader.readAsDataURL(file);
         };btn.onclick=function(){inp.click();};
       })(doc,fi,ub);
@@ -707,13 +764,11 @@ This typically indicates that your device does not have a healthy Internet conne
         var db=document.createElement('button');
         db.style.cssText='padding:5px 10px;border:1px solid rgba(239,68,68,0.4);border-radius:6px;background:transparent;color:#ef4444;font-size:12px;cursor:pointer;';
         db.innerHTML='&#128465;';
-        (function(d){db.onclick=function(){if(!confirm('Remove this document?'))return;delete driver[d.key];delete driver[d.key+'Name'];saveDriver(driver);ov.remove();setTimeout(function(){showDocsModal(driver);},150);};})(doc);
+        (function(d){db.onclick=function(){if(!confirm('Remove?'))return;delete driver[d.key];delete driver[d.key+'Name'];saveDriver(driver);ov.remove();setTimeout(function(){showDocsModal(driver);},150);};})(doc);
         btns.appendChild(db);
       }
       row.appendChild(btns);box.appendChild(row);
     });
-
-    // Performance edit
     var perf=document.createElement('div');
     perf.style.cssText='margin-top:20px;border-top:1px solid var(--border);padding-top:16px;';
     perf.innerHTML='<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Performance &amp; Info</div>';
@@ -731,7 +786,7 @@ This typically indicates that your device does not have a healthy Internet conne
     sb.textContent='Save Changes';
     sb.onclick=function(){
       Object.keys(inps).forEach(function(k){driver[k]=inps[k].value;});
-      saveDriver(driver);sb.textContent='Saved!';sb.style.background='#10b981';sb.style.color='#fff';
+      saveDriver(driver);sb.textContent='Saved! ---';sb.style.background='#10b981';sb.style.color='#fff';
       setTimeout(function(){ov.remove();},800);
     };
     perf.appendChild(g);perf.appendChild(sb);box.appendChild(perf);
@@ -739,6 +794,7 @@ This typically indicates that your device does not have a healthy Internet conne
     document.getElementById('cls-docs').onclick=function(){ov.remove();};
   }
 
+  // ------ Run ------
   wait(function(){
     var _t=null;
     new MutationObserver(function(){
