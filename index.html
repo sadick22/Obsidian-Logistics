@@ -467,42 +467,118 @@ This typically indicates that your device does not have a healthy Internet conne
     return result;
   }
 
-  // Read React state via fiber - the app stores data in React state only
+  // Walk ALL React fiber nodes recursively to find data context
   function getReactData(){
     try{
       var root=document.getElementById('root');
       if(!root)return null;
-      // Find React fiber key
-      var fiberKey=Object.keys(root).find(function(k){return k.startsWith('__reactFiber');});
+      var fiberKey=null;
+      var keys=Object.keys(root);
+      for(var i=0;i<keys.length;i++){if(keys[i].indexOf('__reactFiber')===0){fiberKey=keys[i];break;}}
       if(!fiberKey)return null;
-      var fiber=root[fiberKey];
-      // Walk fiber tree to find DataContext value
-      var node=fiber;
-      var maxDepth=200;
-      while(node&&maxDepth-->0){
-        if(node.memoizedProps&&node.memoizedProps.value&&node.memoizedProps.value.data){
-          return node.memoizedProps.value.data;
-        }
-        node=node.child||node.sibling||( node.return&&node.return.sibling)||null;
+
+      // Deep walk the fiber tree
+      function walkFiber(node,depth){
+        if(!node||depth>500)return null;
+        // Check memoizedProps
+        try{
+          if(node.memoizedProps&&node.memoizedProps.value){
+            var v=node.memoizedProps.value;
+            if(v.data&&Array.isArray(v.data.payments))return v.data;
+          }
+        }catch(e){}
+        // Check memoizedState
+        try{
+          var s=node.memoizedState;
+          while(s){
+            if(s.memoizedState&&s.memoizedState.payments)return s.memoizedState;
+            if(s.queue&&s.queue.lastRenderedState&&s.queue.lastRenderedState.payments)return s.queue.lastRenderedState;
+            s=s.next;
+          }
+        }catch(e){}
+        var found=null;
+        if(node.child)found=walkFiber(node.child,depth+1);
+        if(!found&&node.sibling)found=walkFiber(node.sibling,depth+1);
+        return found;
       }
-    }catch(e){}
-    return null;
+
+      return walkFiber(root[fiberKey],0);
+    }catch(e){return null;}
   }
+
+  // Scrape wages directly from the Payments page table (most reliable)
+  function scrapeWagesFromDOM(){
+    var total=0;
+    var tables=document.querySelectorAll('table');
+    tables.forEach(function(table){
+      var rows=table.querySelectorAll('tbody tr');
+      rows.forEach(function(row){
+        var cells=row.querySelectorAll('td');
+        // Look for a cell containing "Driver Salaries" or "Driver Sal"
+        var isDriverWage=false;
+        var amount=0;
+        cells.forEach(function(cell){
+          var txt=(cell.textContent||'').trim();
+          if(txt.toLowerCase().indexOf('driver sal')>-1||txt.toLowerCase().indexOf('driver wage')>-1){
+            isDriverWage=true;
+          }
+          // Parse GHS amount
+          var ghsMatch=txt.match(/GHS\s*([\d,]+)/);
+          if(ghsMatch){
+            var num=parseFloat(ghsMatch[1].replace(/,/g,''));
+            if(num>0)amount=num;
+          }
+        });
+        if(isDriverWage&&amount>0)total+=amount;
+      });
+    });
+    return total;
+  }
+
+  // Store wages computed from Payments page visit
+  var _cachedWages=0;
+  var _wagesComputed=false;
 
   function getWages(){
     try{
+      // Try React fiber first
       var data=getReactData();
-      if(!data)return 0;
-      var payments=Array.isArray(data.payments)?data.payments:[];
-      var total=0;
-      payments.forEach(function(p){
-        var cat=(p.category||'').toLowerCase();
-        if(cat==='driver salaries/wages'||cat.indexOf('driver salari')>-1||cat.indexOf('driver salary')>-1||cat.indexOf('driver wage')>-1){
-          total+=parseFloat(p.amount)||0;
+      if(data&&Array.isArray(data.payments)&&data.payments.length>0){
+        var total=0;
+        data.payments.forEach(function(p){
+          var cat=(p.category||'').toLowerCase();
+          if(cat.indexOf('driver sal')>-1||cat.indexOf('driver wage')>-1){
+            total+=parseFloat(p.amount)||0;
+          }
+        });
+        if(total>0){_cachedWages=total;_wagesComputed=true;return total;}
+      }
+      // Return cached if available
+      if(_wagesComputed)return _cachedWages;
+      // Fallback: try to find from localStorage obsidian_logistics_data
+      try{
+        var raw=localStorage.getItem('obsidian_logistics_data');
+        if(raw){
+          var d=JSON.parse(raw);
+          var payments=Array.isArray(d.payments)?d.payments:[];
+          var t=0;
+          payments.forEach(function(p){
+            var cat=(p.category||'').toLowerCase();
+            if(cat.indexOf('driver sal')>-1||cat.indexOf('driver wage')>-1)t+=parseFloat(p.amount)||0;
+          });
+          if(t>0)return t;
         }
-      });
-      return total;
-    }catch(e){return 0;}
+      }catch(e){}
+      return _cachedWages;
+    }catch(e){return _cachedWages;}
+  }
+
+  // Scan Payments page whenever we're on it and cache the wages
+  function scanPaymentsPage(){
+    var h=document.querySelector('header h1');
+    if(!h||(h.textContent||'').indexOf('Payment')===-1)return;
+    var scraped=scrapeWagesFromDOM();
+    if(scraped>0){_cachedWages=scraped;_wagesComputed=true;}
   }
 
   function renderStats(){
@@ -561,6 +637,7 @@ This typically indicates that your device does not have a healthy Internet conne
     new MutationObserver(function(){
       clearTimeout(_t);
       _t=setTimeout(function(){
+        scanPaymentsPage(); // Cache wages whenever on payments page
         if(!isDriversPage()){
           var old=document.getElementById('drv-stats-final');if(old)old.remove();
           return;
@@ -568,6 +645,7 @@ This typically indicates that your device does not have a healthy Internet conne
         renderStats();
       },600);
     }).observe(document.body,{childList:true,subtree:true});
+    scanPaymentsPage();
     renderStats();
   });
 })();
