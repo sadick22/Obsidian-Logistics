@@ -548,12 +548,22 @@ This typically indicates that your device does not have a healthy Internet conne
     if(!onDriversPage())return;
     if(document.getElementById('drv-inject'))return;
 
-    // Find form by gold border
+    // Find form by h3 heading text
     var formCard=null;
-    var cards=document.querySelectorAll('.card');
-    for(var i=0;i<cards.length;i++){
-      if((cards[i].style.cssText||'').indexOf('c8a86e')>-1){
-        formCard=cards[i];break;
+    var h3s=document.querySelectorAll('h3');
+    for(var i=0;i<h3s.length;i++){
+      var txt=(h3s[i].textContent||'').trim();
+      if(txt==='Add New Driver'||txt==='Edit Driver'){
+        // Walk up to find the .card container
+        var el=h3s[i];
+        for(var j=0;j<8;j++){
+          if(!el.parentElement)break;
+          el=el.parentElement;
+          if(el.classList&&el.classList.contains('card')){formCard=el;break;}
+          // Also check if it has a form-grid child
+          if(el.querySelector&&el.querySelector('.form-grid')){formCard=el;break;}
+        }
+        break;
       }
     }
     if(!formCard)return;
