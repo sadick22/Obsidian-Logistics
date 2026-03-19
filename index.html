@@ -440,18 +440,29 @@ This typically indicates that your device does not have a healthy Internet conne
   function wait(cb){
     var t=setInterval(function(){
       var r=document.getElementById('root');
-      if(r&&r.children.length>0){clearInterval(t);setTimeout(cb,1400);}
+      if(r&&r.children.length>0){clearInterval(t);setTimeout(cb,1500);}
     },300);
   }
 
-  function getData(){
-    try{var r=localStorage.getItem('obsidian_logistics_data');return r?JSON.parse(r):{};}catch(e){return{};}
+  // Read drivers from ALL possible localStorage keys
+  function getDrivers(){
+    try{
+      var raw=localStorage.getItem('obsidian_logistics_data');
+      if(raw){
+        var d=JSON.parse(raw);
+        if(d.drivers&&d.drivers.length)return d.drivers;
+      }
+    }catch(e){}
+    return[];
   }
 
-  function saveDrivers(drivers){
+  function saveDriver(updatedDriver){
     try{
-      var d=getData();
-      d.drivers=drivers;
+      var raw=localStorage.getItem('obsidian_logistics_data');
+      var d=raw?JSON.parse(raw):{};
+      d.drivers=(d.drivers||[]).map(function(dr){
+        return dr.id===updatedDriver.id?updatedDriver:dr;
+      });
       localStorage.setItem('obsidian_logistics_data',JSON.stringify(d));
     }catch(e){}
   }
@@ -461,128 +472,149 @@ This typically indicates that your device does not have a healthy Internet conne
     return h&&(h.textContent||'').indexOf('Driver')>-1;
   }
 
-  // ------ 1. Stats cards (always fresh) ------
+  // ------ Stats cards ------
   function renderStats(){
     if(!isDriversPage())return;
-    var old=document.getElementById('drv-stats');
+    var old=document.getElementById('drv-stats2');
     if(old)old.remove();
-    var drivers=(getData().drivers)||[];
-    var stats=[
-      {l:'Total Drivers',v:drivers.length,c:'#4f46e5'},
-      {l:'Active',v:drivers.filter(function(d){return d.status==='Active';}).length,c:'#10b981'},
-      {l:'On Leave',v:drivers.filter(function(d){return d.status==='On Leave';}).length,c:'#f59e0b'},
-      {l:'Total Trips',v:drivers.reduce(function(s,d){return s+(parseInt(d.trips)||0);},0),c:'#3b82f6'},
-      {l:'Total Earnings',v:'GHS '+(drivers.reduce(function(s,d){return s+(parseFloat(d.earnings)||0);},0)).toLocaleString(),c:'#10b981'},
-    ];
+
+    var drivers=getDrivers();
+
+    // Find the page content area - look for the card containing the table
+    var mainContent=document.querySelector('main');
+    if(!mainContent)return;
+
+    // Find the padding div
+    var paddingDiv=null;
+    var divs=mainContent.querySelectorAll('div');
+    for(var i=0;i<divs.length;i++){
+      var s=divs[i].style.cssText||'';
+      if(s.indexOf('24px 28px')>-1||s.indexOf('24px')>-1&&s.indexOf('28px')>-1){
+        paddingDiv=divs[i];break;
+      }
+    }
+    if(!paddingDiv)return;
+
     var bar=document.createElement('div');
-    bar.id='drv-stats';
-    bar.style.cssText='display:flex;gap:14px;padding:0 28px 20px;flex-wrap:wrap;';
-    stats.forEach(function(s){
+    bar.id='drv-stats2';
+    bar.style.cssText='display:flex;gap:14px;margin-bottom:20px;flex-wrap:wrap;';
+
+    var active=drivers.filter(function(d){return d.status==='Active';}).length;
+    var onLeave=drivers.filter(function(d){return d.status==='On Leave';}).length;
+    var trips=drivers.reduce(function(s,d){return s+(parseInt(d.trips)||0);},0);
+    var earn=drivers.reduce(function(s,d){return s+(parseFloat(d.earnings)||0);},0);
+
+    [
+      {l:'Total Drivers',v:drivers.length,   c:'#4f46e5'},
+      {l:'Active',       v:active,           c:'#10b981'},
+      {l:'On Leave',     v:onLeave,          c:'#f59e0b'},
+      {l:'Total Trips',  v:trips,            c:'#3b82f6'},
+      {l:'Total Earnings',v:'GHS '+earn.toLocaleString(),c:'#10b981'},
+    ].forEach(function(s){
       var c=document.createElement('div');
-      c.style.cssText='flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);';
+      c.style.cssText='flex:1;min-width:110px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow);';
       c.innerHTML='<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);font-weight:500;">'+s.l+'</div>'
-        +'<div style="font-size:22px;font-weight:700;color:'+s.c+';margin-top:6px;">'+s.v+'</div>';
+        +'<div style="font-size:20px;font-weight:700;color:'+s.c+';margin-top:5px;">'+s.v+'</div>';
       bar.appendChild(c);
     });
-    var inner=document.querySelector('main > div > div[style*="padding"]');
-    if(inner)inner.insertBefore(bar,inner.firstChild);
+
+    paddingDiv.insertBefore(bar,paddingDiv.firstChild);
   }
 
-  // ------ 2. Enhanced table columns ------
+  // ------ Enhance table: add ON-TIME, EARNINGS, DOCS columns ------
   function enhanceTable(){
     if(!isDriversPage())return;
-    var drivers=(getData().drivers)||[];
-    if(!drivers.length)return;
+    var drivers=getDrivers();
 
     document.querySelectorAll('table').forEach(function(table){
       var ths=Array.from(table.querySelectorAll('thead th'));
-      var headers=ths.map(function(t){return(t.textContent||'').trim().toUpperCase();});
-      var hasDriver=headers.some(function(h){return h.indexOf('DRIVER')>-1;});
-      if(!hasDriver)return;
+      var hdrs=ths.map(function(t){return(t.textContent||'').trim().toUpperCase();});
+      if(!hdrs.some(function(h){return h.indexOf('DRIVER')>-1;}))return;
 
-      // Add EARNINGS + ON-TIME + DOCS columns if not present
-      var actIdx=headers.indexOf('ACTIONS');
-      if(actIdx===-1)return;
+      var actIdx=ths.length-1; // ACTIONS is last
       var actionsTh=ths[actIdx];
 
-      if(headers.indexOf('ON-TIME')===-1){
-        var th1=document.createElement('th');
-        th1.textContent='ON-TIME';
-        th1.style.cssText='font-size:12px;font-weight:500;color:var(--text-muted);padding:10px 14px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.05em;';
-        actionsTh.parentNode.insertBefore(th1,actionsTh);
-      }
-      if(headers.indexOf('EARNINGS')===-1){
-        var th2=document.createElement('th');
-        th2.textContent='EARNINGS';
-        th2.style.cssText='font-size:12px;font-weight:500;color:var(--text-muted);padding:10px 14px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.05em;';
-        actionsTh.parentNode.insertBefore(th2,actionsTh);
-      }
-      if(headers.indexOf('DOCS')===-1){
-        var th3=document.createElement('th');
-        th3.textContent='DOCS';
-        th3.style.cssText='font-size:12px;font-weight:500;color:var(--text-muted);padding:10px 14px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.05em;';
-        actionsTh.parentNode.insertBefore(th3,actionsTh);
+      // Add headers once
+      if(hdrs.indexOf('DOCS')===-1){
+        ['ON-TIME','EARNINGS','DOCS'].forEach(function(label){
+          var th=document.createElement('th');
+          th.textContent=label;
+          th.style.cssText='font-size:12px;font-weight:500;color:var(--text-muted);padding:10px 14px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;';
+          actionsTh.parentNode.insertBefore(th,actionsTh);
+        });
       }
 
-      // Add cells to each row
+      // Add cells to new rows only
       table.querySelectorAll('tbody tr').forEach(function(row){
-        if(row._enhanced)return;
-        row._enhanced=true;
+        if(row._drv)return;
+        row._drv=true;
         var cells=row.querySelectorAll('td');
         if(!cells.length)return;
 
-        // Find driver name
-        var nameEl=null;
-        row.querySelectorAll('div').forEach(function(d){
-          if(!d.children.length&&(d.style.cssText||'').indexOf('500')>-1&&!nameEl)nameEl=d;
-        });
-        var name=nameEl?(nameEl.textContent||'').trim():'';
+        // Find driver name - look in the row for bold text
+        var name='';
+        var allDivs=row.querySelectorAll('div');
+        for(var i=0;i<allDivs.length;i++){
+          var el=allDivs[i];
+          if(el.children.length>0)continue;
+          var txt=(el.textContent||'').trim();
+          var css=el.style.cssText||'';
+          // Name divs have font-weight:500 and reasonable length
+          if(txt.length>2&&txt.length<50&&css.indexOf('500')>-1&&txt.indexOf('@')===-1){
+            name=txt;break;
+          }
+        }
+
         var driver=null;
-        for(var i=0;i<drivers.length;i++){if((drivers[i].name||'')==name){driver=drivers[i];break;}}
+        for(var j=0;j<drivers.length;j++){
+          if((drivers[j].name||'')==name){driver=drivers[j];break;}
+        }
 
         var earnings=driver?parseFloat(driver.earnings)||0:0;
         var onTime=driver?parseFloat(driver.onTimeRate)||100:100;
         var onTimeColor=onTime>=90?'#10b981':onTime>=70?'#f59e0b':'#ef4444';
-        var docCount=driver?(['licenseDoc','idDoc','healthDoc','ghanaCardDoc'].filter(function(k){return driver[k];}).length):0;
+        var docKeys=['licenseDoc','idDoc','healthDoc','ghanaCardDoc','passportDoc'];
+        var docCount=driver?docKeys.filter(function(k){return driver[k];}).length:0;
 
         var lastTd=cells[cells.length-1];
 
-        // Docs cell
+        // DOCS cell
         var tdDocs=document.createElement('td');
-        tdDocs.style.cssText='padding:12px 14px;';
+        tdDocs.style.cssText='padding:12px 14px;cursor:pointer;';
         tdDocs.innerHTML='<span style="font-size:12px;font-weight:600;color:'+(docCount>0?'#10b981':'var(--text-muted)')+';">'
-          +(docCount>0?'&#128196; '+docCount+' file'+(docCount>1?'s':''):'No docs')
-          +'</span>';
-        tdDocs.style.cursor='pointer';
-        tdDocs.title='Click to manage documents';
-        if(driver)tdDocs.onclick=function(){showDocsModal(driver,drivers);};
-        lastTd.parentNode.insertBefore(tdDocs, lastTd);
+          +(docCount>0?'&#128196; '+docCount+' file'+(docCount>1?'s':''):'&#43; Add docs')+'</span>';
+        if(driver){
+          (function(drv){
+            tdDocs.onclick=function(e){e.stopPropagation();showDocsModal(drv);};
+          })(driver);
+        }
+        lastTd.parentNode.insertBefore(tdDocs,lastTd);
 
-        // Earnings cell
+        // EARNINGS cell
         var tdEarn=document.createElement('td');
         tdEarn.style.cssText='padding:12px 14px;font-size:14px;font-weight:600;color:#10b981;';
         tdEarn.textContent='GHS '+earnings.toLocaleString();
-        lastTd.parentNode.insertBefore(tdEarn, lastTd);
+        lastTd.parentNode.insertBefore(tdEarn,lastTd);
 
-        // On-time cell
-        var tdOnTime=document.createElement('td');
-        tdOnTime.style.cssText='padding:12px 14px;';
-        tdOnTime.innerHTML='<span style="font-weight:600;color:'+onTimeColor+';">'+onTime+'%</span>';
-        lastTd.parentNode.insertBefore(tdOnTime, lastTd);
+        // ON-TIME cell
+        var tdOT=document.createElement('td');
+        tdOT.style.cssText='padding:12px 14px;';
+        tdOT.innerHTML='<span style="font-weight:600;color:'+onTimeColor+';">'+onTime+'%</span>';
+        lastTd.parentNode.insertBefore(tdOT,lastTd);
       });
     });
   }
 
-  // ------ 3. Documents modal ------
+  // ------ Documents modal ------
   var DOC_TYPES=[
-    {key:'licenseDoc',  label:"Driver's License"},
-    {key:'idDoc',       label:'National ID / Ghana Card'},
-    {key:'healthDoc',   label:'Health Insurance Card'},
-    {key:'ghanaCardDoc',label:'Ghana Card'},
-    {key:'passportDoc', label:'Passport'},
+    {key:'licenseDoc',   label:"Driver's License"},
+    {key:'idDoc',        label:'National ID'},
+    {key:'healthDoc',    label:'Health Insurance Card'},
+    {key:'ghanaCardDoc', label:'Ghana Card'},
+    {key:'passportDoc',  label:'Passport / Travel Docs'},
   ];
 
-  function showDocsModal(driver, allDrivers){
+  function showDocsModal(driver){
     var existing=document.getElementById('docs-modal');
     if(existing)existing.remove();
 
@@ -592,57 +624,61 @@ This typically indicates that your device does not have a healthy Internet conne
     overlay.onclick=function(e){if(e.target===overlay)overlay.remove();};
 
     var box=document.createElement('div');
-    box.style.cssText='background:var(--surface);border-radius:16px;padding:28px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;box-shadow:0 8px 40px rgba(139,92,246,0.2);';
+    box.style.cssText='background:var(--surface);border-radius:16px;padding:28px;width:100%;max-width:540px;max-height:88vh;overflow-y:auto;box-shadow:0 8px 40px rgba(139,92,246,0.25);';
     box.onclick=function(e){e.stopPropagation();};
 
     // Header
-    var hdr=document.createElement('div');
-    hdr.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;';
-    hdr.innerHTML='<div>'
-      +'<div style="font-weight:700;font-size:17px;color:var(--text-primary);">Documents --- '+driver.name+'</div>'
-      +'<div style="font-size:13px;color:var(--text-muted);margin-top:3px;">Upload and manage driver documents</div>'
-      +'</div>'
-      +'<button id="close-docs" style="width:32px;height:32px;border:1px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;color:var(--text-secondary);font-size:16px;">&#10005;</button>';
+    box.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">'
+      +'<div><div style="font-weight:700;font-size:17px;color:var(--text-primary);">'+driver.name+'</div>'
+      +'<div style="font-size:13px;color:var(--text-muted);margin-top:2px;">'+(driver.role||driver.status||'Driver')+' - Documents &amp; Performance</div></div>'
+      +'<button id="close-docs-modal" style="width:32px;height:32px;border:1px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;color:var(--text-secondary);font-size:16px;">&#10005;</button>'
+      +'</div>';
 
-    var list=document.createElement('div');
-    list.style.cssText='display:flex;flex-direction:column;gap:12px;';
+    // Documents section
+    var docsSection=document.createElement('div');
+    docsSection.style.cssText='margin-bottom:24px;';
+    docsSection.innerHTML='<div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Documents</div>';
 
     DOC_TYPES.forEach(function(doc){
       var row=document.createElement('div');
-      row.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface2);border-radius:10px;border:1px solid var(--border);';
+      row.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface2);border-radius:10px;border:1px solid var(--border);margin-bottom:8px;';
 
-      var info=document.createElement('div');
-      var hasDoc=driver[doc.key];
-      info.innerHTML='<div style="font-weight:500;font-size:14px;color:var(--text-primary);">'+doc.label+'</div>'
-        +'<div style="font-size:12px;color:'+(hasDoc?'#10b981':'var(--text-muted)')+';">'+
-        (hasDoc?'&#10003; Uploaded':'Not uploaded')+'</div>';
+      var hasDoc=!!driver[doc.key];
+      row.innerHTML='<div>'
+        +'<div style="font-weight:500;font-size:13px;color:var(--text-primary);">'+doc.label+'</div>'
+        +'<div style="font-size:11px;color:'+(hasDoc?'#10b981':'var(--text-muted)')+';">'+(hasDoc?'&#10003; Uploaded':'Not uploaded yet')+'</div>'
+        +'</div>';
 
       var btns=document.createElement('div');
-      btns.style.cssText='display:flex;gap:8px;align-items:center;';
+      btns.style.cssText='display:flex;gap:6px;';
 
-      // Upload button
-      var uploadBtn=document.createElement('button');
-      uploadBtn.style.cssText='padding:6px 12px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;font-family:inherit;';
-      uploadBtn.textContent=hasDoc?'Replace':'Upload';
       var fileInput=document.createElement('input');
       fileInput.type='file';
       fileInput.accept='image/*,.pdf';
       fileInput.style.display='none';
-      fileInput.onchange=function(){
-        var file=fileInput.files[0];
-        if(!file)return;
-        var reader=new FileReader();
-        reader.onload=function(e){
-          driver[doc.key]=e.target.result;
-          driver[doc.key.replace('Doc','')+'Name']=file.name;
-          var updated=allDrivers.map(function(d){return d.id===driver.id?driver:d;});
-          saveDrivers(updated);
-          overlay.remove();
-          setTimeout(function(){showDocsModal(driver,updated);},100);
+
+      var uploadBtn=document.createElement('button');
+      uploadBtn.style.cssText='padding:5px 11px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap;';
+      uploadBtn.textContent=hasDoc?'Replace':'Upload';
+
+      (function(d, fi, ub){
+        fi.onchange=function(){
+          var file=fi.files[0];
+          if(!file)return;
+          // Check file size (max 2MB)
+          if(file.size>2*1024*1024){alert('File too large. Max 2MB.');return;}
+          var reader=new FileReader();
+          reader.onload=function(ev){
+            driver[d.key]=ev.target.result;
+            driver[d.key+'Name']=file.name;
+            saveDriver(driver);
+            overlay.remove();
+            setTimeout(function(){showDocsModal(driver);},200);
+          };
+          reader.readAsDataURL(file);
         };
-        reader.readAsDataURL(file);
-      };
-      uploadBtn.onclick=function(){fileInput.click();};
+        ub.onclick=function(){fi.click();};
+      })(doc, fileInput, uploadBtn);
 
       btns.appendChild(fileInput);
       btns.appendChild(uploadBtn);
@@ -650,81 +686,84 @@ This typically indicates that your device does not have a healthy Internet conne
       if(hasDoc){
         var dlBtn=document.createElement('a');
         dlBtn.href=driver[doc.key];
-        dlBtn.download=driver[doc.key.replace('Doc','')+'Name']||doc.label;
-        dlBtn.style.cssText='padding:6px 12px;border:1px solid #3b82f6;border-radius:7px;background:transparent;color:#3b82f6;font-size:12px;cursor:pointer;text-decoration:none;';
+        dlBtn.download=driver[doc.key+'Name']||doc.label;
+        dlBtn.style.cssText='padding:5px 11px;border:1px solid #3b82f6;border-radius:6px;color:#3b82f6;font-size:12px;cursor:pointer;text-decoration:none;white-space:nowrap;';
         dlBtn.textContent='Download';
         btns.appendChild(dlBtn);
 
         var delBtn=document.createElement('button');
-        delBtn.style.cssText='padding:6px 10px;border:1px solid rgba(239,68,68,0.4);border-radius:7px;background:transparent;color:#ef4444;font-size:12px;cursor:pointer;';
+        delBtn.style.cssText='padding:5px 10px;border:1px solid rgba(239,68,68,0.4);border-radius:6px;background:transparent;color:#ef4444;font-size:12px;cursor:pointer;';
         delBtn.innerHTML='&#128465;';
-        delBtn.onclick=function(){
-          delete driver[doc.key];
-          delete driver[doc.key.replace('Doc','')+'Name'];
-          var updated=allDrivers.map(function(d){return d.id===driver.id?driver:d;});
-          saveDrivers(updated);
-          overlay.remove();
-          setTimeout(function(){showDocsModal(driver,updated);},100);
-        };
+        (function(d){
+          delBtn.onclick=function(){
+            if(!confirm('Remove this document?'))return;
+            delete driver[d.key];
+            delete driver[d.key+'Name'];
+            saveDriver(driver);
+            overlay.remove();
+            setTimeout(function(){showDocsModal(driver);},200);
+          };
+        })(doc);
         btns.appendChild(delBtn);
       }
 
-      row.appendChild(info);
       row.appendChild(btns);
-      list.appendChild(row);
+      docsSection.appendChild(row);
     });
 
-    // Earnings & on-time edit section
-    var editSection=document.createElement('div');
-    editSection.style.cssText='margin-top:20px;padding-top:20px;border-top:1px solid var(--border);';
-    editSection.innerHTML='<div style="font-weight:600;font-size:14px;color:var(--text-primary);margin-bottom:14px;">Performance & Earnings</div>';
+    // Performance & extras edit section
+    var perfSection=document.createElement('div');
+    perfSection.innerHTML='<div style="font-size:12px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;">Performance &amp; Info</div>';
+
+    var grid=document.createElement('div');
+    grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;';
 
     var fields=[
-      {key:'earnings',label:'Total Earnings (GHS)',type:'number',val:driver.earnings||0},
-      {key:'onTimeRate',label:'On-Time Rate (%)',type:'number',val:driver.onTimeRate||100},
-      {key:'phone',label:'Phone Number',type:'text',val:driver.phone||''},
-      {key:'license',label:'License Number',type:'text',val:driver.license||''},
+      {key:'earnings',   label:'Total Earnings (GHS)',type:'number'},
+      {key:'onTimeRate', label:'On-Time Rate (%)',    type:'number'},
+      {key:'phone',      label:'Phone Number',        type:'text'},
+      {key:'license',    label:'License Number',      type:'text'},
     ];
-    var grid=document.createElement('div');
-    grid.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:12px;';
-    var inputRefs={};
+
+    var inputs={};
     fields.forEach(function(f){
       var wrap=document.createElement('div');
       var lbl=document.createElement('label');
-      lbl.style.cssText='font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:5px;';
+      lbl.style.cssText='font-size:12px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:4px;';
       lbl.textContent=f.label;
       var inp=document.createElement('input');
       inp.type=f.type;
-      inp.value=f.val;
-      inp.style.cssText='width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-primary);font-size:13px;font-family:inherit;box-sizing:border-box;';
-      inputRefs[f.key]=inp;
+      inp.value=driver[f.key]||'';
+      inp.style.cssText='width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-primary);font-size:13px;font-family:inherit;box-sizing:border-box;';
+      inputs[f.key]=inp;
       wrap.appendChild(lbl);
       wrap.appendChild(inp);
       grid.appendChild(wrap);
     });
+
     var saveBtn=document.createElement('button');
-    saveBtn.style.cssText='margin-top:14px;width:100%;padding:11px;background:#c8a86e;border:none;border-radius:10px;color:#1c1c1e;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;';
+    saveBtn.style.cssText='width:100%;padding:11px;background:#c8a86e;border:none;border-radius:10px;color:#1c1c1e;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;transition:all 0.2s;';
     saveBtn.textContent='Save Changes';
     saveBtn.onclick=function(){
-      fields.forEach(function(f){driver[f.key]=inputRefs[f.key].value;});
-      var updated=allDrivers.map(function(d){return d.id===driver.id?driver:d;});
-      saveDrivers(updated);
-      saveBtn.textContent='Saved!';
+      fields.forEach(function(f){driver[f.key]=inputs[f.key].value;});
+      saveDriver(driver);
+      saveBtn.textContent='Saved! &#10003;';
       saveBtn.style.background='#10b981';
-      setTimeout(function(){overlay.remove();},800);
+      saveBtn.style.color='#fff';
+      setTimeout(function(){overlay.remove();},900);
     };
-    editSection.appendChild(grid);
-    editSection.appendChild(saveBtn);
 
-    box.appendChild(hdr);
-    box.appendChild(list);
-    box.appendChild(editSection);
+    perfSection.appendChild(grid);
+    perfSection.appendChild(saveBtn);
+
+    box.appendChild(docsSection);
+    box.appendChild(perfSection);
     overlay.appendChild(box);
     document.body.appendChild(overlay);
-    document.getElementById('close-docs').onclick=function(){overlay.remove();};
+    document.getElementById('close-docs-modal').onclick=function(){overlay.remove();};
   }
 
-  // ------ Run everything ------
+  // ------ Main runner ------
   wait(function(){
     var _t=null;
     new MutationObserver(function(){
@@ -732,10 +771,11 @@ This typically indicates that your device does not have a healthy Internet conne
       _t=setTimeout(function(){
         renderStats();
         enhanceTable();
-      },400);
+      },500);
     }).observe(document.body,{childList:true,subtree:true});
     renderStats();
     enhanceTable();
   });
+
 })();
 </script>
