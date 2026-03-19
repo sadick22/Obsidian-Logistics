@@ -444,8 +444,15 @@ This typically indicates that your device does not have a healthy Internet conne
 
   function addDriverStats(){
     var h=document.querySelector('header h1');
-    if(!h||(h.textContent||'').indexOf('Driver')===-1)return;
-    if(document.getElementById('drv-stats'))return;
+    if(!h||(h.textContent||'').indexOf('Driver')===-1){
+      // Not on drivers page - remove stats if they exist
+      var old=document.getElementById('drv-stats');
+      if(old)old.remove();
+      return;
+    }
+    // Always remove and re-render so counts stay fresh
+    var existing=document.getElementById('drv-stats');
+    if(existing)existing.remove();
 
     var drivers=[];
     try{
@@ -484,6 +491,76 @@ This typically indicates that your device does not have a healthy Internet conne
       clearTimeout(_t);_t=setTimeout(addDriverStats,400);
     }).observe(document.body,{childList:true,subtree:true});
     addDriverStats();
+  });
+})();
+</script>
+
+<script>
+(function(){
+  function wait(cb){
+    var t=setInterval(function(){
+      var r=document.getElementById('root');
+      if(r&&r.children.length>0){clearInterval(t);setTimeout(cb,1400);}
+    },300);
+  }
+
+  function addEarningsColumn(){
+    var h=document.querySelector('header h1');
+    if(!h||(h.textContent||'').indexOf('Driver')===-1)return;
+    var drivers=[];
+    try{
+      var raw=localStorage.getItem('obsidian_logistics_data');
+      if(raw){var d=JSON.parse(raw);drivers=d.drivers||[];}
+    }catch(e){return;}
+    if(!drivers.length)return;
+
+    document.querySelectorAll('table').forEach(function(table){
+      if(table._earn)return;
+      var ths=Array.from(table.querySelectorAll('thead th'));
+      var headers=ths.map(function(t){return(t.textContent||'').trim().toUpperCase();});
+      var hasDriver=headers.some(function(h){return h.indexOf('DRIVER')>-1;});
+      if(!hasDriver)return;
+      if(headers.indexOf('EARNINGS')>-1)return;
+      table._earn=true;
+
+      // Insert EARNINGS header before ACTIONS
+      var actIdx=headers.indexOf('ACTIONS');
+      if(actIdx===-1)return;
+      var th=document.createElement('th');
+      th.textContent='EARNINGS';
+      th.style.cssText='font-size:12px;font-weight:500;color:var(--text-muted);padding:10px 14px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.05em;';
+      ths[actIdx].parentNode.insertBefore(th, ths[actIdx]);
+
+      // Insert earnings cell in each row
+      table.querySelectorAll('tbody tr').forEach(function(row){
+        if(row._earn)return;
+        row._earn=true;
+        var cells=row.querySelectorAll('td');
+        if(!cells.length)return;
+        // Get driver name
+        var nameEl=null;
+        row.querySelectorAll('div').forEach(function(d){
+          if(!d.children.length&&(d.style.cssText||'').indexOf('500')>-1&&!nameEl)nameEl=d;
+        });
+        var name=nameEl?(nameEl.textContent||'').trim():'';
+        var driver=null;
+        for(var i=0;i<drivers.length;i++){if((drivers[i].name||'')==name){driver=drivers[i];break;}}
+        var earnings=driver?parseFloat(driver.earnings)||0:0;
+        var lastTd=cells[cells.length-1];
+        var td=document.createElement('td');
+        td.style.cssText='padding:12px 14px;font-size:14px;font-weight:600;color:#10b981;';
+        td.textContent='GHS '+earnings.toLocaleString();
+        lastTd.parentNode.insertBefore(td, lastTd);
+      });
+    });
+  }
+
+  wait(function(){
+    var _t=null;
+    new MutationObserver(function(){
+      clearTimeout(_t);_t=setTimeout(addEarningsColumn,500);
+    }).observe(document.body,{childList:true,subtree:true});
+    addEarningsColumn();
   });
 })();
 </script>
