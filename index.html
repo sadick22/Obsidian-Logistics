@@ -738,6 +738,376 @@ This typically indicates that your device does not have a healthy Internet conne
   // ------ 3. DOCS column ------
   function buildDocsColumn(){
     if(!onDriversPage())return;
+
+    document.querySelectorAll('table').forEach(function(table){
+      var ths=Array.from(table.querySelectorAll('thead th'));
+      var hdrs=ths.map(function(t){return(t.textContent||'').trim().toUpperCase();});
+      if(!hdrs.some(function(h){return h.indexOf('DRIVER')>-1;}))return;
+      if(hdrs.indexOf('DOCS')>-1)return;
+
+      var actTh=ths[ths.length-1];
+      var th=document.createElement('th');th.textContent='DOCS';
+      th.style.cssText='font-size:12px;font-weight:500;color:var(--text-muted);padding:10px 14px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.05em;';
+      actTh.parentNode.insertBefore(th,actTh);
+
+      table.querySelectorAll('tbody tr').forEach(function(row){
+        if(row._docsCol)return;row._docsCol=true;
+        var cells=row.querySelectorAll('td');if(!cells.length)return;
+
+        // Get driver name
+        var driverName='';
+        var divs=row.querySelectorAll('div');
+        for(var i=0;i<divs.length;i++){
+          var el=divs[i];if(el.children.length>0)continue;
+          var txt=(el.textContent||'').trim();
+          if(txt.length>2&&txt.length<50&&(el.style.cssText||'').indexOf('500')>-1&&txt.indexOf('@')===-1){driverName=txt;break;}
+        }
+
+        var lastTd=cells[cells.length-1];
+        var td=document.createElement('td');td.style.cssText='padding:8px 14px;';
+        var btn=document.createElement('button');
+        btn.className='drv-docs-btn';
+        btn.setAttribute('data-dname',driverName);
+        btn.style.cssText='padding:6px 14px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text-muted);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;';
+        btn.textContent='+ Add Docs';
+
+        btn.onclick=function(e){
+          e.stopPropagation();
+          var name=btn.getAttribute('data-dname');
+          var ctx=getCtx();
+          var drivers=(ctx&&ctx.data&&ctx.data.drivers)||[];
+          var driver=null;
+          for(var j=0;j<drivers.length;j++){if((drivers[j].name||'')==name){driver=drivers[j];break;}}
+          if(!driver){alert('Driver not found');return;}
+          openDocsPopup(driver);
+        };
+
+        td.appendChild(btn);lastTd.parentNode.insertBefore(td,lastTd);
+      });
+    });
+
+    // Refresh button styles based on actual doc data
+    setTimeout(function(){
+      var ctx=getCtx();
+      var drivers=(ctx&&ctx.data&&ctx.data.drivers)||[];
+      document.querySelectorAll('button.drv-docs-btn').forEach(function(btn){
+        var name=btn.getAttribute('data-dname');
+        var driver=null;
+        for(var j=0;j<drivers.length;j++){if((drivers[j].name||'')==name){driver=drivers[j];break;}}
+        if(!driver)return;
+        var hasDoc=DOCS.some(function(d){return driver[d.key];});
+        if(hasDoc){
+          btn.style.cssText='padding:6px 14px;border:1px solid #c8a86e;border-radius:8px;background:rgba(200,168,110,0.08);color:#c8a86e;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;';
+          btn.innerHTML='&#128065; View PDF';
+        }
+      });
+    },800);
+  }
+
+  function(){
+  'use strict';
+
+  // ------ Globals ------
+  var DOCS=[
+    {key:'licenseDoc',   label:"Driver's License"},
+    {key:'idDoc',        label:'National ID'},
+    {key:'healthDoc',    label:'Health Insurance Card'},
+    {key:'ghanaCardDoc', label:'Ghana Card'},
+    {key:'passportDoc',  label:'Passport'},
+  ];
+  var _uploads={};  // files staged before save
+
+  function wait(cb){
+    var t=setInterval(function(){
+      var r=document.getElementById('root');
+      if(r&&r.children.length>0){clearInterval(t);setTimeout(cb,1500);}
+    },300);
+  }
+
+  function onDriversPage(){
+    var h=document.querySelector('header h1');
+    return h&&(h.textContent||'').indexOf('Driver')>-1;
+  }
+
+  // Get React data context via fiber
+  function getCtx(){
+    try{
+      var root=document.getElementById('root');
+      var keys=Object.keys(root);
+      var fk='';
+      for(var i=0;i<keys.length;i++){if(keys[i].indexOf('__reactFiber')===0){fk=keys[i];break;}}
+      if(!fk)return null;
+      function walk(n,d){
+        if(!n||d>800)return null;
+        try{
+          var v=n.memoizedProps&&n.memoizedProps.value;
+          if(v&&v.data&&v.update&&Array.isArray(v.data.drivers))return v;
+        }catch(e){}
+        var r=null;
+        try{if(n.child)r=walk(n.child,d+1);}catch(e){}
+        if(!r)try{if(n.sibling)r=walk(n.sibling,d+1);}catch(e){}
+        return r;
+      }
+      return walk(root[fk],0);
+    }catch(e){return null;}
+  }
+
+  // Save extra data to a specific driver by id
+  function saveToDriver(driverId, extraData){
+    var ctx=getCtx();
+    if(!ctx)return false;
+    var drivers=ctx.data.drivers||[];
+    var found=false;
+    var updated=drivers.map(function(d){
+      if(String(d.id)===String(driverId)){
+        found=true;
+        var copy={};
+        for(var k in d)copy[k]=d[k];
+        for(var k2 in extraData)copy[k2]=extraData[k2];
+        return copy;
+      }
+      return d;
+    });
+    if(found)ctx.update({drivers:updated});
+    return found;
+  }
+
+  // ------ 1. Stats cards ------
+  function renderStats(){
+    if(!onDriversPage())return;
+    var rows=document.querySelectorAll('table tbody tr');
+    if(!rows.length){setTimeout(renderStats,700);return;}
+    var old=document.getElementById('drv-sc');if(old)old.remove();
+    var total=0,cars=[],trips=0,trucks=[],onLeave=0;
+    rows.forEach(function(row){
+      var c=row.querySelectorAll('td');
+      if(c.length<5)return;
+      total++;
+      if((c[2].textContent||'').indexOf('On Leave')>-1)onLeave++;
+      var car=(c[4].textContent||'').trim();if(car&&car!=='-')cars.push(car);
+      trips+=parseInt((c[5].textContent||'').trim())||0;
+      var truck=(c[6].textContent||'').trim();if(truck&&truck!=='-')trucks.push(truck);
+    });
+    var main=document.querySelector('main');if(!main)return;
+    var target=null;
+    var divs=Array.from(main.querySelectorAll('div'));
+    for(var i=0;i<divs.length;i++){
+      var css=divs[i].style.cssText||'';
+      if(css.indexOf('24px')>-1&&css.indexOf('28px')>-1&&divs[i].children.length>0){target=divs[i];break;}
+    }
+    if(!target)return;
+    var bar=document.createElement('div');bar.id='drv-sc';
+    bar.style.cssText='display:flex;gap:14px;margin-bottom:20px;flex-wrap:wrap;';
+    [{l:'Total Drivers',v:total,c:'#4f46e5'},
+     {l:'Car Number',v:cars.length?cars[0]:'--',c:'var(--text-primary)'},
+     {l:'Total Trips',v:trips,c:'#3b82f6'},
+     {l:'Truck',v:trucks.length?trucks[0]:'--',c:'var(--text-primary)'},
+     {l:'On Leave',v:onLeave,c:'#f59e0b'},
+    ].forEach(function(s){
+      var c=document.createElement('div');
+      c.style.cssText='flex:1;min-width:110px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;';
+      c.innerHTML='<div style="font-size:10px;text-transform:uppercase;color:var(--text-muted);font-weight:500;margin-bottom:4px;letter-spacing:.06em;">'+s.l+'</div>'
+        +'<div style="font-size:18px;font-weight:700;color:'+s.c+';white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+s.v+'</div>';
+      bar.appendChild(c);
+    });
+    target.insertBefore(bar,target.firstChild);
+  }
+
+  // ------ 2. Inject extra fields into Add/Edit form ------
+  function injectFormFields(){
+    if(!onDriversPage())return;
+    if(document.getElementById('drv-inject'))return;
+
+    // Find form by h3 heading text
+    var formCard=null;
+    var h3s=document.querySelectorAll('h3');
+    for(var i=0;i<h3s.length;i++){
+      var txt=(h3s[i].textContent||'').trim();
+      if(txt==='Add New Driver'||txt==='Edit Driver'){
+        // Walk up to find the .card container
+        var el=h3s[i];
+        for(var j=0;j<8;j++){
+          if(!el.parentElement)break;
+          el=el.parentElement;
+          if(el.classList&&el.classList.contains('card')){formCard=el;break;}
+          // Also check if it has a form-grid child
+          if(el.querySelector&&el.querySelector('.form-grid')){formCard=el;break;}
+        }
+        break;
+      }
+    }
+    if(!formCard)return;
+    var grid=formCard.querySelector('.form-grid');
+    if(!grid)return;
+
+    _uploads={};  // reset on each form open
+
+    var wrap=document.createElement('div');
+    wrap.id='drv-inject';
+    wrap.style.cssText='grid-column:1/-1;';
+
+    // Performance section
+    var p=document.createElement('div');
+    p.style.cssText='border-top:1px solid var(--border);padding-top:16px;margin-top:4px;margin-bottom:16px;';
+    p.innerHTML='<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;">Performance & Contact</div>';
+    var pg=document.createElement('div');pg.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:14px;';
+    [{id:'di_phone',l:'Phone Number',t:'text'},{id:'di_lic',l:'License Number',t:'text'},
+     {id:'di_earn',l:'Total Earnings (GHS)',t:'number'},{id:'di_ontime',l:'On-Time Rate (%)',t:'number'}
+    ].forEach(function(f){
+      // Pre-fill if editing
+      var ctx=getCtx();var drivers=(ctx&&ctx.data&&ctx.data.drivers)||[];
+      var editId=getEditingDriverId();
+      var existing=editId?drivers.find(function(d){return String(d.id)===editId;}):null;
+      var valMap={'di_phone':'phone','di_lic':'license','di_earn':'earnings','di_ontime':'onTimeRate'};
+      var val=existing?existing[valMap[f.id]]||'':'';
+
+      var w=document.createElement('div');
+      var lb=document.createElement('label');lb.style.cssText='font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:5px;';lb.textContent=f.l;
+      var ip=document.createElement('input');ip.type=f.t;ip.id=f.id;ip.placeholder=f.l;ip.value=val;
+      ip.style.cssText='width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text-primary);outline:none;box-sizing:border-box;font-family:inherit;';
+      ip.onfocus=function(){ip.style.borderColor='#c8a86e';};
+      ip.onblur=function(){ip.style.borderColor='var(--border)';};
+      w.appendChild(lb);w.appendChild(ip);pg.appendChild(w);
+    });
+    p.appendChild(pg);
+
+    // Docs section
+    var ds=document.createElement('div');
+    ds.style.cssText='border-top:1px solid var(--border);padding-top:16px;';
+    ds.innerHTML='<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:12px;">Upload Documents</div>';
+    var dg=document.createElement('div');dg.style.cssText='display:grid;grid-template-columns:1fr 1fr;gap:12px;';
+
+    // Pre-fill existing docs for edit mode
+    var ctx2=getCtx();var drivers2=(ctx2&&ctx2.data&&ctx2.data.drivers)||[];
+    var editId2=getEditingDriverId();
+    var existingDriver=editId2?drivers2.find(function(d){return String(d.id)===editId2;}):null;
+
+    DOCS.forEach(function(doc){
+      var alreadyUploaded=existingDriver&&existingDriver[doc.key];
+      var alreadyName=existingDriver&&existingDriver[doc.key+'Name'];
+
+      var w=document.createElement('div');
+      var lb=document.createElement('label');lb.style.cssText='font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:6px;';lb.textContent=doc.label;
+      var box=document.createElement('div');
+      box.id='di_box_'+doc.key;
+      box.style.cssText='border:1.5px dashed '+(alreadyUploaded?'#10b981':'var(--border)')+';border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;background:'+(alreadyUploaded?'rgba(16,185,129,0.05)':'var(--surface2)')+';cursor:pointer;transition:all 0.2s;';
+      var lbl=document.createElement('span');
+      lbl.id='di_lbl_'+doc.key;
+      lbl.style.cssText='font-size:12px;color:'+(alreadyUploaded?'#10b981':'var(--text-muted)')+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;';
+      lbl.textContent=alreadyUploaded?('- '+(alreadyName||'Uploaded')):'Click to upload PDF or image';
+      var icon=document.createElement('span');icon.style.cssText='font-size:15px;flex-shrink:0;margin-left:8px;';icon.textContent='';
+      var fi=document.createElement('input');fi.type='file';fi.accept='image/*,.pdf';fi.style.display='none';fi.id='di_fi_'+doc.key;
+      box.appendChild(lbl);box.appendChild(icon);box.appendChild(fi);
+      box.onclick=function(){fi.click();};
+      box.onmouseenter=function(){if(!_uploads[doc.key])box.style.borderColor='#c8a86e';};
+      box.onmouseleave=function(){if(!_uploads[doc.key])box.style.borderColor=(alreadyUploaded?'#10b981':'var(--border)');};
+
+      // If already uploaded keep it in _uploads so it stays on save
+      if(alreadyUploaded){
+        _uploads[doc.key]={data:existingDriver[doc.key],name:alreadyName||doc.label};
+      }
+
+      (function(d,inp,sp,bx){
+        inp.onchange=function(){
+          var file=inp.files[0];if(!file)return;
+          if(file.size>2097152){alert('Max 2MB - please compress the file');return;}
+          var reader=new FileReader();
+          reader.onload=function(ev){
+            _uploads[d.key]={data:ev.target.result,name:file.name};
+            sp.textContent='- '+file.name;
+            sp.style.color='#10b981';
+            bx.style.borderColor='#10b981';
+            bx.style.background='rgba(16,185,129,0.05)';
+          };
+          reader.readAsDataURL(file);
+        };
+      })(doc,fi,lbl,box);
+
+      w.appendChild(lb);w.appendChild(box);dg.appendChild(w);
+    });
+    ds.appendChild(dg);
+
+    wrap.appendChild(p);wrap.appendChild(ds);
+    grid.appendChild(wrap);
+
+    // Intercept save button
+    var saveBtn=formCard.querySelector('button.btn-gold');
+    if(saveBtn&&!saveBtn._injected){
+      saveBtn._injected=true;
+      saveBtn.addEventListener('click',function(){
+        var extra={};
+        var ph=document.getElementById('di_phone');
+        var li=document.getElementById('di_lic');
+        var ea=document.getElementById('di_earn');
+        var ot=document.getElementById('di_ontime');
+        if(ph&&ph.value)extra.phone=ph.value;
+        if(li&&li.value)extra.license=li.value;
+        if(ea&&ea.value)extra.earnings=parseFloat(ea.value)||0;
+        if(ot&&ot.value)extra.onTimeRate=parseFloat(ot.value)||100;
+        // Add all staged uploads
+        Object.keys(_uploads).forEach(function(k){
+          extra[k]=_uploads[k].data;
+          extra[k+'Name']=_uploads[k].name;
+        });
+        if(!Object.keys(extra).length)return;
+
+        // For EDIT: we know the driver id
+        var editingId=getEditingDriverId();
+        if(editingId){
+          // Save immediately
+          setTimeout(function(){saveToDriver(editingId,extra);},400);
+          setTimeout(function(){saveToDriver(editingId,extra);},1000);
+        } else {
+          // For ADD: wait for React to create the new driver, then patch it
+          function patchNewest(tries){
+            if(tries<=0)return;
+            setTimeout(function(){
+              var c=getCtx();
+              if(!c||!c.data||!c.data.drivers||!c.data.drivers.length){patchNewest(tries-1);return;}
+              var newest=c.data.drivers[c.data.drivers.length-1];
+              saveToDriver(newest.id,extra);
+            },tries===3?600:1200);
+          }
+          patchNewest(3);
+        }
+        _uploads={};
+      });
+    }
+  }
+
+  // Get the id of the driver currently being edited (from React state)
+  function getEditingDriverId(){
+    try{
+      var ctx=getCtx();if(!ctx)return null;
+      // Find editId in fiber state - look for showForm=true and editId != null
+      var root=document.getElementById('root');
+      var fk='';var keys=Object.keys(root);
+      for(var i=0;i<keys.length;i++){if(keys[i].indexOf('__reactFiber')===0){fk=keys[i];break;}}
+      // Walk looking for memoizedState with the edit id
+      function findEditId(node,depth){
+        if(!node||depth>800)return null;
+        try{
+          var s=node.memoizedState;
+          while(s){
+            // editId is typically a number (Date.now())
+            if(s.memoizedState&&typeof s.memoizedState==='number'&&s.memoizedState>1000000000000){
+              return String(s.memoizedState);
+            }
+            s=s.next;
+          }
+        }catch(e){}
+        var r=null;
+        try{if(node.child)r=findEditId(node.child,depth+1);}catch(e){}
+        if(!r)try{if(node.sibling)r=findEditId(node.sibling,depth+1);}catch(e){}
+        return r;
+      }
+      return findEditId(root[fk],0);
+    }catch(e){return null;}
+  }
+
+  // ------ 3. DOCS column ------
+  function buildDocsColumn(){
+    if(!onDriversPage())return;
     var ctx=getCtx();
     var drivers=(ctx&&ctx.data&&ctx.data.drivers)||[];
 
@@ -891,9 +1261,10 @@ This typically indicates that your device does not have a healthy Internet conne
         renderStats();
         injectFormFields();
         buildDocsColumn();
+        refreshDocsBtns();
       },600);
     }).observe(document.body,{childList:true,subtree:true});
-    renderStats();injectFormFields();buildDocsColumn();
+    renderStats();injectFormFields();buildDocsColumn();refreshDocsBtns();
   });
 
 })();
