@@ -467,19 +467,37 @@ This typically indicates that your device does not have a healthy Internet conne
     return result;
   }
 
-  // Driver wages from localStorage payments - exact category match
+  // Read React state via fiber - the app stores data in React state only
+  function getReactData(){
+    try{
+      var root=document.getElementById('root');
+      if(!root)return null;
+      // Find React fiber key
+      var fiberKey=Object.keys(root).find(function(k){return k.startsWith('__reactFiber');});
+      if(!fiberKey)return null;
+      var fiber=root[fiberKey];
+      // Walk fiber tree to find DataContext value
+      var node=fiber;
+      var maxDepth=200;
+      while(node&&maxDepth-->0){
+        if(node.memoizedProps&&node.memoizedProps.value&&node.memoizedProps.value.data){
+          return node.memoizedProps.value.data;
+        }
+        node=node.child||node.sibling||( node.return&&node.return.sibling)||null;
+      }
+    }catch(e){}
+    return null;
+  }
+
   function getWages(){
     try{
-      var raw=localStorage.getItem('obsidian_logistics_data');
-      if(!raw)return 0;
-      var d=JSON.parse(raw);
-      var payments=Array.isArray(d.payments)?d.payments:[];
+      var data=getReactData();
+      if(!data)return 0;
+      var payments=Array.isArray(data.payments)?data.payments:[];
       var total=0;
       payments.forEach(function(p){
-        var cat=(p.category||'');
-        // Match exact category "Driver Salaries/Wages" (case-insensitive)
-        var catLower=cat.toLowerCase();
-        if(catLower==='driver salaries/wages'||catLower.indexOf('driver salaries')>-1||catLower.indexOf('driver salary')>-1||catLower.indexOf('driver wage')>-1){
+        var cat=(p.category||'').toLowerCase();
+        if(cat==='driver salaries/wages'||cat.indexOf('driver salari')>-1||cat.indexOf('driver salary')>-1||cat.indexOf('driver wage')>-1){
           total+=parseFloat(p.amount)||0;
         }
       });
