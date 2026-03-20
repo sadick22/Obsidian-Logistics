@@ -482,16 +482,82 @@ This typically indicates that your device does not have a healthy Internet conne
   }
 
   function getDriver(name){
+    // Try fiber first
     var ctx=getCtx();
     var drivers=(ctx&&ctx.data&&ctx.data.drivers)||[];
     for(var i=0;i<drivers.length;i++){
       if((drivers[i].name||'')==name)return drivers[i];
     }
+    // Fallback: create a minimal driver object from the table row
+    // Find the row with this name and build driver from cells
+    var rows=document.querySelectorAll('table tbody tr');
+    for(var j=0;j<rows.length;j++){
+      var row=rows[j];
+      var divs=row.querySelectorAll('div');
+      var rowName='';
+      for(var k=0;k<divs.length;k++){
+        var el=divs[k];if(el.children.length>0)continue;
+        var txt=(el.textContent||'').trim();
+        if(txt.length>2&&txt.length<50&&(el.style.cssText||'').indexOf('500')>-1&&txt.indexOf('@')===-1){rowName=txt;break;}
+      }
+      if(rowName===name){
+        var cells=row.querySelectorAll('td');
+        // Build minimal driver - we need id to save later
+        // Try to get id from React fiber on the row element
+        var driverId=null;
+        try{
+          var rkeys=Object.keys(row);
+          for(var rk=0;rk<rkeys.length;rk++){
+            if(rkeys[rk].indexOf('__reactFiber')===0){
+              var fiber=row[rkeys[rk]];
+              var node=fiber;
+              for(var depth=0;depth<20;depth++){
+                if(!node)break;
+                if(node.memoizedProps&&node.memoizedProps.children){
+                  // look for id in nearby state
+                }
+                // Check pendingProps for id
+                if(node.pendingProps&&node.pendingProps.id){driverId=node.pendingProps.id;break;}
+                node=node.return;
+              }
+              break;
+            }
+          }
+        }catch(e){}
+        return {id:driverId||Date.now(), name:name};
+      }
+    }
+    return null;
+  }
+
+  // Deep fiber walk - try multiple entry points
+  function getCtxDeep(){
+    var ctx=getCtx();
+    if(ctx)return ctx;
+    // Try from a table cell element instead of root
+    var cells=document.querySelectorAll('table tbody td');
+    for(var i=0;i<cells.length;i++){
+      try{
+        var keys=Object.keys(cells[i]);
+        var fk='';
+        for(var j=0;j<keys.length;j++){if(keys[j].indexOf('__reactFiber')===0){fk=keys[j];break;}}
+        if(!fk)continue;
+        function walk2(n,d){
+          if(!n||d>400)return null;
+          try{var v=n.memoizedProps&&n.memoizedProps.value;if(v&&v.data&&v.update&&Array.isArray(v.data.drivers))return v;}catch(e){}
+          var r=null;
+          try{if(n.return)r=walk2(n.return,d+1);}catch(e){}
+          return r;
+        }
+        var result=walk2(cells[i][fk],0);
+        if(result)return result;
+      }catch(e){}
+    }
     return null;
   }
 
   function updateDriver(driver){
-    var ctx=getCtx();
+    var ctx=getCtxDeep();
     if(!ctx)return;
     var all=(ctx.data.drivers||[]).map(function(d){
       return String(d.id)===String(driver.id)?driver:d;
