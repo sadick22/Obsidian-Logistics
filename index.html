@@ -915,21 +915,31 @@ This typically indicates that your device does not have a healthy Internet conne
   function patchAdminCards(){
     if(!isAdminsPage())return;
 
-    // Find all admin cards - they're in a grid
-    var cards=document.querySelectorAll('[style*="border-radius"]');
-    cards.forEach(function(card){
+    // The admin cards are direct children of a grid div with auto-fill
+    // Find the grid container
+    var grid=null;
+    var allDivs=document.querySelectorAll('div');
+    for(var i=0;i<allDivs.length;i++){
+      var s=allDivs[i].style.cssText||'';
+      if(s.indexOf('auto-fill')>-1||s.indexOf('minmax(260')>-1||s.indexOf('minmax(240')>-1){
+        grid=allDivs[i];break;
+      }
+    }
+    if(!grid)return;
+
+    Array.from(grid.children).forEach(function(card){
       if(card._gearAdded)return;
 
-      // Find name inside card
+      // Get admin name - look for the first bold text that's a name
       var nameEl=null;
-      var allDivs=card.querySelectorAll('div');
-      for(var i=0;i<allDivs.length;i++){
-        var d=allDivs[i];
+      var innerDivs=card.querySelectorAll('div');
+      for(var i=0;i<innerDivs.length;i++){
+        var d=innerDivs[i];
         if(d.children.length>0)continue;
-        var txt=(d.textContent||'').trim();
-        var css=d.style.cssText||'';
-        if(txt.length>1&&txt.length<50&&(css.indexOf('600')>-1||css.indexOf('700')>-1)&&txt.indexOf('@')===-1&&txt.indexOf('.')====-1){
-          nameEl=d;break;
+        var txt=(d.textContent||'').replace('YOU','').trim();
+        if(txt.length>1&&txt.length<50&&txt.indexOf('@')===-1&&txt.indexOf('.')===-1&&txt.indexOf('ago')===-1&&txt.indexOf('seen')===-1&&txt!=='Offline'&&txt!=='Online now'){
+          var cs=window.getComputedStyle(d);
+          if(parseInt(cs.fontWeight)>=600){nameEl=d;break;}
         }
       }
       if(!nameEl)return;
@@ -937,19 +947,21 @@ This typically indicates that your device does not have a healthy Internet conne
       if(!adminName||adminName.length<2)return;
 
       card._gearAdded=true;
-      card.style.position='relative';
 
-      // Add gear icon button
+      // Gear button - position at bottom right of card
       var gear=document.createElement('button');
       gear.innerHTML='&#9881;';
       gear.title='Edit / Delete';
-      gear.style.cssText='position:absolute;top:10px;right:10px;width:30px;height:30px;border:1px solid var(--border);border-radius:7px;background:var(--surface);cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;color:var(--text-secondary);transition:all 0.2s;z-index:10;';
-      gear.onmouseenter=function(){gear.style.borderColor='#c8a86e';gear.style.color='#c8a86e';};
-      gear.onmouseleave=function(){gear.style.borderColor='var(--border)';gear.style.color='var(--text-secondary)';};
+      gear.style.cssText='position:absolute;bottom:14px;right:14px;width:28px;height:28px;border:1px solid rgba(200,168,110,0.4);border-radius:7px;background:transparent;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;color:#c8a86e;z-index:10;';
+      gear.onmouseenter=function(){gear.style.background='rgba(200,168,110,0.1)';};
+      gear.onmouseleave=function(){gear.style.background='transparent';};
       gear.onclick=function(e){
         e.stopPropagation();
         openAdminModal(adminName);
       };
+
+      // Make card relative positioned
+      card.style.position='relative';
       card.appendChild(gear);
     });
   }
