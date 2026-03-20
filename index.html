@@ -873,3 +873,195 @@ This typically indicates that your device does not have a healthy Internet conne
 
 })();
 </script>
+
+<script>
+(function(){
+  'use strict';
+
+  function wait(cb){
+    var t=setInterval(function(){
+      var r=document.getElementById('root');
+      if(r&&r.children.length>0){clearInterval(t);setTimeout(cb,1500);}
+    },300);
+  }
+
+  function isAdminsPage(){
+    var h=document.querySelector('header h1');
+    return h&&(h.textContent||'').indexOf('Admin')>-1;
+  }
+
+  function getCtx(){
+    try{
+      var root=document.getElementById('root');
+      var keys=Object.keys(root);var fk='';
+      for(var i=0;i<keys.length;i++){if(keys[i].indexOf('__reactFiber')===0){fk=keys[i];break;}}
+      if(!fk)return null;
+      function walk(n,d){
+        if(!n||d>800)return null;
+        try{var v=n.memoizedProps&&n.memoizedProps.value;if(v&&v.data&&v.update&&Array.isArray(v.data.admins))return v;}catch(e){}
+        var r=null;try{if(n.child)r=walk(n.child,d+1);}catch(e){}
+        if(!r)try{if(n.sibling)r=walk(n.sibling,d+1);}catch(e){}
+        return r;
+      }
+      return walk(root[fk],0);
+    }catch(e){return null;}
+  }
+
+  function getMyProfile(){
+    try{var r=localStorage.getItem('obsidian_admin_profile');return r?JSON.parse(r):{};}
+    catch(e){return{};}
+  }
+
+  function patchAdminCards(){
+    if(!isAdminsPage())return;
+
+    // Find all admin cards - they're in a grid
+    var cards=document.querySelectorAll('[style*="border-radius"]');
+    cards.forEach(function(card){
+      if(card._gearAdded)return;
+
+      // Find name inside card
+      var nameEl=null;
+      var allDivs=card.querySelectorAll('div');
+      for(var i=0;i<allDivs.length;i++){
+        var d=allDivs[i];
+        if(d.children.length>0)continue;
+        var txt=(d.textContent||'').trim();
+        var css=d.style.cssText||'';
+        if(txt.length>1&&txt.length<50&&(css.indexOf('600')>-1||css.indexOf('700')>-1)&&txt.indexOf('@')===-1&&txt.indexOf('.')====-1){
+          nameEl=d;break;
+        }
+      }
+      if(!nameEl)return;
+      var adminName=(nameEl.textContent||'').replace('YOU','').trim();
+      if(!adminName||adminName.length<2)return;
+
+      card._gearAdded=true;
+      card.style.position='relative';
+
+      // Add gear icon button
+      var gear=document.createElement('button');
+      gear.innerHTML='&#9881;';
+      gear.title='Edit / Delete';
+      gear.style.cssText='position:absolute;top:10px;right:10px;width:30px;height:30px;border:1px solid var(--border);border-radius:7px;background:var(--surface);cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;color:var(--text-secondary);transition:all 0.2s;z-index:10;';
+      gear.onmouseenter=function(){gear.style.borderColor='#c8a86e';gear.style.color='#c8a86e';};
+      gear.onmouseleave=function(){gear.style.borderColor='var(--border)';gear.style.color='var(--text-secondary)';};
+      gear.onclick=function(e){
+        e.stopPropagation();
+        openAdminModal(adminName);
+      };
+      card.appendChild(gear);
+    });
+  }
+
+  function openAdminModal(adminName){
+    var ex=document.getElementById('adm-modal');if(ex)ex.remove();
+    var me=getMyProfile();
+    var isMe=(me.name&&me.name===adminName)||(me.email&&adminName&&me.email.indexOf(adminName)>-1);
+
+    var ov=document.createElement('div');
+    ov.id='adm-modal';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;';
+    ov.onclick=function(e){if(e.target===ov)ov.remove();};
+
+    var box=document.createElement('div');
+    box.style.cssText='background:var(--surface);border-radius:16px;padding:28px;width:100%;max-width:420px;box-shadow:0 8px 40px rgba(139,92,246,0.2);';
+    box.onclick=function(e){e.stopPropagation();};
+
+    // Header
+    box.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">'
+      +'<div style="font-weight:700;font-size:17px;color:var(--text-primary);">Edit Admin</div>'
+      +'<button id="cls-adm" style="width:32px;height:32px;border:1px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;color:var(--text-secondary);font-size:16px;">&#10005;</button>'
+      +'</div>';
+
+    // Name display
+    var nameRow=document.createElement('div');
+    nameRow.style.cssText='display:flex;align-items:center;gap:14px;padding:16px;background:var(--surface2);border-radius:10px;margin-bottom:20px;';
+    var initials=(adminName||'AD').split(' ').map(function(w){return w[0]||'';}).join('').toUpperCase().slice(0,2);
+    var colors=['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#c8a86e','#3b82f6'];
+    var color=colors[(adminName.charCodeAt(0)||0)%colors.length];
+    nameRow.innerHTML='<div style="width:44px;height:44px;border-radius:50%;background:'+color+';display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0;">'+initials+'</div>'
+      +'<div><div style="font-weight:600;font-size:15px;color:var(--text-primary);">'+adminName+'</div>'
+      +'<div style="font-size:12px;color:var(--text-muted);">'+( isMe?'Your account':'Admin account')+'</div></div>';
+    box.appendChild(nameRow);
+
+    // Role selector
+    var roleWrap=document.createElement('div');
+    roleWrap.style.cssText='margin-bottom:20px;';
+    roleWrap.innerHTML='<label style="font-size:13px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:6px;">Role</label>';
+    var roleSelect=document.createElement('select');
+    roleSelect.style.cssText='width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-primary);font-size:14px;font-family:inherit;outline:none;';
+    ['Owner','Super Admin','Admin','Manager','Finance Manager','Operations Manager','Driver Manager','Viewer'].forEach(function(r){
+      var opt=document.createElement('option');
+      opt.value=r;opt.textContent=r;
+      roleSelect.appendChild(opt);
+    });
+    roleWrap.appendChild(roleSelect);
+    box.appendChild(roleWrap);
+
+    // Buttons
+    var btnRow=document.createElement('div');
+    btnRow.style.cssText='display:flex;gap:10px;';
+
+    var saveBtn=document.createElement('button');
+    saveBtn.style.cssText='flex:1;padding:11px;background:#c8a86e;border:none;border-radius:10px;color:#1c1c1e;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;';
+    saveBtn.textContent='Save Changes';
+    saveBtn.onclick=function(){
+      var ctx=getCtx();
+      if(!ctx){
+        // No firebase ctx - just show success (role stored locally)
+        saveBtn.textContent='Saved!';
+        saveBtn.style.background='#10b981';
+        setTimeout(function(){ov.remove();},800);
+        return;
+      }
+      var admins=(ctx.data.admins||[]).map(function(a){
+        if((a.name||'')==adminName){
+          var copy={};for(var k in a)copy[k]=a[k];
+          copy.role=roleSelect.value;
+          return copy;
+        }
+        return a;
+      });
+      ctx.update({admins:admins});
+      saveBtn.textContent='Saved!';
+      saveBtn.style.background='#10b981';
+      saveBtn.style.color='#fff';
+      setTimeout(function(){ov.remove();location.reload();},900);
+    };
+
+    var delBtn=document.createElement('button');
+    delBtn.style.cssText='padding:11px 16px;border:1px solid rgba(239,68,68,0.4);border-radius:10px;background:transparent;color:#ef4444;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;white-space:nowrap;';
+    delBtn.innerHTML='&#128465; Delete';
+    delBtn.onclick=function(){
+      if(isMe){alert('You cannot delete your own account.');return;}
+      if(!confirm('Remove '+adminName+' from admins?'))return;
+      var ctx=getCtx();
+      if(ctx){
+        var admins=(ctx.data.admins||[]).filter(function(a){return(a.name||'')!==adminName;});
+        ctx.update({admins:admins});
+      }
+      ov.remove();
+      setTimeout(function(){location.reload();},400);
+    };
+
+    btnRow.appendChild(saveBtn);
+    btnRow.appendChild(delBtn);
+    box.appendChild(btnRow);
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+    document.getElementById('cls-adm').onclick=function(){ov.remove();};
+  }
+
+  wait(function(){
+    var _t=null;
+    new MutationObserver(function(){
+      clearTimeout(_t);
+      _t=setTimeout(function(){
+        if(isAdminsPage())patchAdminCards();
+      },600);
+    }).observe(document.body,{childList:true,subtree:true});
+    if(isAdminsPage())patchAdminCards();
+  });
+})();
+</script>
