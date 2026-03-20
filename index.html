@@ -730,11 +730,12 @@ This typically indicates that your device does not have a healthy Internet conne
             driver[d.key]=ev.target.result;
             driver[d.key+'Name']=file.name;
             updateDriver(driver);
+            showToast('Document saved to Firebase!');
             ov.remove();
             setTimeout(function(){
               refreshBtns();
               openDocs(driver);
-            },300);
+            },400);
           };
           fr.readAsDataURL(file);
         };
@@ -767,11 +768,12 @@ This typically indicates that your device does not have a healthy Internet conne
             delete driver[d.key];
             delete driver[d.key+'Name'];
             updateDriver(driver);
+            showToast('Document removed.');
             ov.remove();
             setTimeout(function(){
               refreshBtns();
               openDocs(driver);
-            },300);
+            },400);
           };
         })(doc);
         btns.appendChild(db);
