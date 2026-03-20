@@ -724,18 +724,20 @@ This typically indicates that your device does not have a healthy Internet conne
         inp.onchange=function(){
           var file=inp.files[0];
           if(!file)return;
-          if(file.size>2097152){alert('Max 2MB');return;}
+          if(file.size>2097152){alert('Max 2MB - please compress the file');return;}
           var fr=new FileReader();
           fr.onload=function(ev){
+            // Stage the upload - don't save yet
             driver[d.key]=ev.target.result;
             driver[d.key+'Name']=file.name;
-            updateDriver(driver);
-            showToast('Document saved to Firebase!');
-            ov.remove();
-            setTimeout(function(){
-              refreshBtns();
-              openDocs(driver);
-            },400);
+            // Update the row display
+            var infoDiv=row.querySelector('div div:last-child');
+            if(infoDiv)infoDiv.textContent='- '+file.name;
+            btn.textContent='Replace';
+            btn.style.borderColor='#10b981';
+            // Show save reminder
+            var saveBar=document.getElementById('dp-savebar');
+            if(saveBar)saveBar.style.display='flex';
           };
           fr.readAsDataURL(file);
         };
@@ -767,13 +769,11 @@ This typically indicates that your device does not have a healthy Internet conne
             if(!confirm('Remove '+d.label+'?'))return;
             delete driver[d.key];
             delete driver[d.key+'Name'];
-            updateDriver(driver);
-            showToast('Document removed.');
+            // Stage deletion - save bar will commit
+            var saveBar=document.getElementById('dp-savebar');
+            if(saveBar)saveBar.style.display='flex';
             ov.remove();
-            setTimeout(function(){
-              refreshBtns();
-              openDocs(driver);
-            },400);
+            setTimeout(function(){openDocs(driver);},200);
           };
         })(doc);
         btns.appendChild(db);
@@ -782,6 +782,69 @@ This typically indicates that your device does not have a healthy Internet conne
       row.appendChild(btns);
       box.appendChild(row);
     });
+    // Save All button bar
+    var saveBar=document.createElement('div');
+    saveBar.id='dp-savebar';
+    saveBar.style.cssText='display:none;margin-top:20px;border-top:1px solid var(--border);padding-top:16px;';
+    var saveBtn=document.createElement('button');
+    saveBtn.style.cssText='width:100%;padding:13px;background:#c8a86e;border:none;border-radius:10px;color:#1c1c1e;font-weight:700;font-size:15px;cursor:pointer;font-family:inherit;';
+    saveBtn.textContent='Save All Documents';
+    saveBtn.onclick=function(){
+      // Try all fiber entry points to find context
+      var ctx=null;
+      // Method 1: from root
+      try{
+        var root=document.getElementById('root');
+        var keys=Object.keys(root);
+        var fk='';for(var i=0;i<keys.length;i++){if(keys[i].indexOf('__reactFiber')===0){fk=keys[i];break;}}
+        if(fk){
+          function walk(n,d){
+            if(!n||d>800)return null;
+            try{var v=n.memoizedProps&&n.memoizedProps.value;if(v&&v.data&&v.update&&Array.isArray(v.data.drivers))return v;}catch(e){}
+            var r=null;try{if(n.child)r=walk(n.child,d+1);}catch(e){}
+            if(!r)try{if(n.sibling)r=walk(n.sibling,d+1);}catch(e){}
+            return r;
+          }
+          ctx=walk(root[fk],0);
+        }
+      }catch(e){}
+      // Method 2: walk UP from a table cell
+      if(!ctx){
+        try{
+          var cells=document.querySelectorAll('table td');
+          for(var ci=0;ci<cells.length&&!ctx;ci++){
+            var ckeys=Object.keys(cells[ci]);
+            var cfk='';for(var cj=0;cj<ckeys.length;cj++){if(ckeys[cj].indexOf('__reactFiber')===0){cfk=ckeys[cj];break;}}
+            if(!cfk)continue;
+            function walkUp(n,d){
+              if(!n||d>50)return null;
+              try{var v=n.memoizedProps&&n.memoizedProps.value;if(v&&v.data&&v.update&&Array.isArray(v.data.drivers))return v;}catch(e){}
+              return n.return?walkUp(n.return,d+1):null;
+            }
+            ctx=walkUp(cells[ci][cfk],0);
+          }
+        }catch(e){}
+      }
+      if(!ctx){
+        saveBtn.textContent='Could not connect - try Edit & Update instead';
+        saveBtn.style.background='#ef4444';
+        return;
+      }
+      var all=(ctx.data.drivers||[]).map(function(d){
+        return String(d.id)===String(driver.id)?driver:d;
+      });
+      ctx.update({drivers:all});
+      saveBtn.textContent='Saved to Firebase!';
+      saveBtn.style.background='#10b981';
+      saveBtn.style.color='#fff';
+      setTimeout(function(){
+        ov.remove();
+        refreshBtns();
+      },900);
+    };
+    saveBar.appendChild(saveBtn);
+    box.appendChild(saveBar);
+
     ov.appendChild(box);
     document.body.appendChild(ov);
     document.getElementById('dp-cls').onclick=function(){ov.remove();};
