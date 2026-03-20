@@ -1026,3 +1026,189 @@ This typically indicates that your device does not have a healthy Internet conne
   });
 })();
 </script>
+
+<script>
+(function(){
+  'use strict';
+
+  function wait(cb){
+    var t=setInterval(function(){
+      var r=document.getElementById('root');
+      if(r&&r.children.length>0){clearInterval(t);setTimeout(cb,1500);}
+    },300);
+  }
+
+  function isDashboardPage(){
+    var h=document.querySelector('header h1');
+    return h&&(h.textContent||'').trim()==='Dashboard';
+  }
+
+  function getMonthlyRevenue(){
+    if(window.__obsCtx&&window.__obsCtx.data){
+      return window.__obsCtx.data.monthlyRevenue||[];
+    }
+    return[];
+  }
+
+  function drawChart(canvas, data){
+    var ctx=canvas.getContext('2d');
+    var W=canvas.width, H=canvas.height;
+    ctx.clearRect(0,0,W,H);
+    if(!data.length){
+      ctx.fillStyle='#6b7280';
+      ctx.font='13px sans-serif';
+      ctx.textAlign='center';
+      ctx.fillText('No data yet. Add entries in Reports.',W/2,H/2);
+      return;
+    }
+
+    var padL=50,padR=16,padT=16,padB=28;
+    var chartW=W-padL-padR;
+    var chartH=H-padT-padB;
+    var n=data.length;
+    var barGroupW=chartW/n;
+    var barW=Math.min(18,barGroupW*0.3);
+    var maxVal=Math.max.apply(null, data.map(function(d){return Math.max(d.revenue||0,d.expenses||0);}));
+    if(maxVal===0)maxVal=1;
+
+    // Grid lines
+    ctx.strokeStyle='rgba(255,255,255,0.06)';
+    ctx.lineWidth=1;
+    for(var gi=0;gi<=4;gi++){
+      var gy=padT+chartH-(gi/4)*chartH;
+      ctx.beginPath();ctx.moveTo(padL,gy);ctx.lineTo(padL+chartW,gy);ctx.stroke();
+      ctx.fillStyle='#9ca3af';
+      ctx.font='10px sans-serif';
+      ctx.textAlign='right';
+      ctx.fillText(Math.round(maxVal*gi/4/1000)+'k',padL-6,gy+3);
+    }
+
+    data.forEach(function(d,i){
+      var cx=padL+i*barGroupW+barGroupW/2;
+      var revH=(d.revenue||0)/maxVal*chartH;
+      var expH=(d.expenses||0)/maxVal*chartH;
+
+      // Revenue bar (blue)
+      ctx.fillStyle='rgba(99,102,241,0.85)';
+      ctx.beginPath();
+      ctx.roundRect(cx-barW-2,padT+chartH-revH,barW,revH,2);
+      ctx.fill();
+
+      // Expenses bar (red)
+      ctx.fillStyle='rgba(239,68,68,0.75)';
+      ctx.beginPath();
+      ctx.roundRect(cx+2,padT+chartH-expH,barW,expH,2);
+      ctx.fill();
+
+      // Month label
+      ctx.fillStyle='#9ca3af';
+      ctx.font='10px sans-serif';
+      ctx.textAlign='center';
+      ctx.fillText(d.month||'',cx,padT+chartH+16);
+    });
+  }
+
+  function injectRevenueCard(){
+    if(!isDashboardPage())return;
+    if(document.getElementById('dash-rev-card'))return;
+
+    // Find the Ongoing Delivery card
+    var cards=document.querySelectorAll('.card');
+    var ongoingCard=null;
+    for(var i=0;i<cards.length;i++){
+      var txt=(cards[i].textContent||'');
+      if(txt.indexOf('Ongoing Delivery')>-1){
+        ongoingCard=cards[i];break;
+      }
+    }
+    if(!ongoingCard)return;
+
+    // Build replacement card
+    var newCard=document.createElement('div');
+    newCard.id='dash-rev-card';
+    newCard.className='card';
+    newCard.style.cssText=ongoingCard.style.cssText||'padding:20px;';
+    if(!newCard.style.padding)newCard.style.padding='20px';
+
+    // Header
+    var header=document.createElement('div');
+    header.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;';
+    header.innerHTML='<div style="font-weight:600;font-size:15px;color:var(--text-primary);">Monthly Revenue vs Expenses</div>'
+      +'<div style="display:flex;align-items:center;gap:12px;">'
+      +'<span style="display:flex;align-items:center;gap:4px;font-size:11px;color:#6366f1;"><span style="width:10px;height:10px;border-radius:2px;background:#6366f1;display:inline-block;"></span>Revenue</span>'
+      +'<span style="display:flex;align-items:center;gap:4px;font-size:11px;color:#ef4444;"><span style="width:10px;height:10px;border-radius:2px;background:#ef4444;display:inline-block;"></span>Expenses</span>'
+      +'</div>';
+
+    // Canvas
+    var canvasWrap=document.createElement('div');
+    canvasWrap.style.cssText='width:100%;';
+    var canvas=document.createElement('canvas');
+    canvas.id='dash-rev-canvas';
+    canvas.style.cssText='width:100%;height:180px;';
+    canvasWrap.appendChild(canvas);
+
+    // Summary row
+    var summary=document.createElement('div');
+    summary.id='dash-rev-summary';
+    summary.style.cssText='display:flex;gap:12px;margin-top:14px;flex-wrap:wrap;';
+
+    newCard.appendChild(header);
+    newCard.appendChild(canvasWrap);
+    newCard.appendChild(summary);
+
+    // Replace ongoing delivery card
+    ongoingCard.parentNode.replaceChild(newCard, ongoingCard);
+
+    // Set canvas size and draw
+    function render(){
+      var rect=canvas.parentNode.getBoundingClientRect();
+      canvas.width=Math.max(rect.width,300);
+      canvas.height=180;
+      var data=getMonthlyRevenue();
+      drawChart(canvas,data);
+
+      // Update summary
+      var totalRev=data.reduce(function(s,d){return s+(d.revenue||0);},0);
+      var totalExp=data.reduce(function(s,d){return s+(d.expenses||0);},0);
+      var profit=totalRev-totalExp;
+      summary.innerHTML=
+        '<div style="flex:1;min-width:100px;background:var(--surface2);border-radius:8px;padding:10px 14px;">'
+        +'<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">Total Revenue</div>'
+        +'<div style="font-size:16px;font-weight:700;color:#6366f1;">GHS '+totalRev.toLocaleString()+'</div>'
+        +'</div>'
+        +'<div style="flex:1;min-width:100px;background:var(--surface2);border-radius:8px;padding:10px 14px;">'
+        +'<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">Total Expenses</div>'
+        +'<div style="font-size:16px;font-weight:700;color:#ef4444;">GHS '+totalExp.toLocaleString()+'</div>'
+        +'</div>'
+        +'<div style="flex:1;min-width:100px;background:var(--surface2);border-radius:8px;padding:10px 14px;">'
+        +'<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">Net Profit</div>'
+        +'<div style="font-size:16px;font-weight:700;color:'+(profit>=0?'#10b981':'#ef4444')+';">GHS '+profit.toLocaleString()+'</div>'
+        +'</div>';
+    }
+    setTimeout(render,200);
+    window.addEventListener('resize',render);
+  }
+
+  wait(function(){
+    var _t=null;
+    new MutationObserver(function(){
+      clearTimeout(_t);
+      _t=setTimeout(function(){
+        if(!isDashboardPage()){
+          // Remove injected card if navigating away
+          return;
+        }
+        injectRevenueCard();
+        // Refresh chart data
+        var canvas=document.getElementById('dash-rev-canvas');
+        if(canvas){
+          canvas.width=canvas.parentNode.getBoundingClientRect().width||400;
+          canvas.height=180;
+          drawChart(canvas,getMonthlyRevenue());
+        }
+      },700);
+    }).observe(document.body,{childList:true,subtree:true});
+    injectRevenueCard();
+  });
+})();
+</script>
