@@ -891,20 +891,50 @@ This typically indicates that your device does not have a healthy Internet conne
   }
 
   function getCtx(){
+    // Try from root down
     try{
       var root=document.getElementById('root');
       var keys=Object.keys(root);var fk='';
       for(var i=0;i<keys.length;i++){if(keys[i].indexOf('__reactFiber')===0){fk=keys[i];break;}}
-      if(!fk)return null;
-      function walk(n,d){
-        if(!n||d>800)return null;
-        try{var v=n.memoizedProps&&n.memoizedProps.value;if(v&&v.data&&v.update&&Array.isArray(v.data.admins))return v;}catch(e){}
-        var r=null;try{if(n.child)r=walk(n.child,d+1);}catch(e){}
-        if(!r)try{if(n.sibling)r=walk(n.sibling,d+1);}catch(e){}
-        return r;
+      if(fk){
+        function walkDown(n,d){
+          if(!n||d>800)return null;
+          try{
+            var v=n.memoizedProps&&n.memoizedProps.value;
+            if(v&&v.data&&v.update){
+              // Accept if it has drivers OR admins
+              if(Array.isArray(v.data.admins)||Array.isArray(v.data.drivers))return v;
+            }
+          }catch(e){}
+          var r=null;try{if(n.child)r=walkDown(n.child,d+1);}catch(e){}
+          if(!r)try{if(n.sibling)r=walkDown(n.sibling,d+1);}catch(e){}
+          return r;
+        }
+        var ctx=walkDown(root[fk],0);
+        if(ctx)return ctx;
       }
-      return walk(root[fk],0);
-    }catch(e){return null;}
+    }catch(e){}
+    // Try walking UP from admin card elements
+    try{
+      var cards=document.querySelectorAll('[style*="minmax"]');
+      if(!cards.length)cards=document.querySelectorAll('[style*="auto-fill"]');
+      for(var ci=0;ci<cards.length;ci++){
+        var ckeys=Object.keys(cards[ci]);var cfk='';
+        for(var cj=0;cj<ckeys.length;cj++){if(ckeys[cj].indexOf('__reactFiber')===0){cfk=ckeys[cj];break;}}
+        if(!cfk)continue;
+        function walkUp(n,d){
+          if(!n||d>100)return null;
+          try{
+            var v=n.memoizedProps&&n.memoizedProps.value;
+            if(v&&v.data&&v.update&&(Array.isArray(v.data.admins)||Array.isArray(v.data.drivers)))return v;
+          }catch(e){}
+          return n.return?walkUp(n.return,d+1):null;
+        }
+        var ctx2=walkUp(cards[ci][cfk],0);
+        if(ctx2)return ctx2;
+      }
+    }catch(e){}
+    return null;
   }
 
   function getMyProfile(){
