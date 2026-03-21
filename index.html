@@ -1528,7 +1528,7 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
     newSel.id='dash-filter-sel';
     newSel.style.cssText=filterSel.style.cssText||'border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:13px;background:var(--surface);color:var(--text-primary);font-family:inherit;cursor:pointer;';
 
-    var periods=['This Week','Last Week','This Month','90 Days','This Year','Custom','All Time'];
+    var periods=['All Time','This Week','Last Week','This Month','90 Days','This Year','Custom'];
     periods.forEach(function(p){
       var opt=document.createElement('option');
       opt.value=p;opt.textContent=p;
@@ -1572,7 +1572,7 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
     filterSel.remove();
 
     // Apply default filter
-    applyFilter('This Week', null, null);
+    applyFilter('All Time', null, null);
   }
 
   wait(function(){
