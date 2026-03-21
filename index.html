@@ -1314,3 +1314,258 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
   });
 })();
 </script>
+
+<script>
+(function(){
+  'use strict';
+
+  function wait(cb){
+    var t=setInterval(function(){
+      var r=document.getElementById('root');
+      if(r&&r.children.length>0){clearInterval(t);setTimeout(cb,1500);}
+    },300);
+  }
+
+  function isDashboard(){
+    var h=document.querySelector('header h1');
+    return h&&(h.textContent||'').trim()==='Dashboard';
+  }
+
+  // Get date range for a period
+  function getRange(period, customFrom, customTo){
+    var now=new Date();
+    var from, to=new Date(now);
+    to.setHours(23,59,59,999);
+
+    if(period==='This Week'){
+      from=new Date(now);
+      from.setDate(now.getDate()-now.getDay());
+      from.setHours(0,0,0,0);
+    } else if(period==='Last Week'){
+      from=new Date(now);
+      from.setDate(now.getDate()-now.getDay()-7);
+      from.setHours(0,0,0,0);
+      to=new Date(from);
+      to.setDate(from.getDate()+6);
+      to.setHours(23,59,59,999);
+    } else if(period==='This Month'){
+      from=new Date(now.getFullYear(),now.getMonth(),1);
+      from.setHours(0,0,0,0);
+    } else if(period==='90 Days'){
+      from=new Date(now);
+      from.setDate(now.getDate()-90);
+      from.setHours(0,0,0,0);
+    } else if(period==='This Year'){
+      from=new Date(now.getFullYear(),0,1);
+      from.setHours(0,0,0,0);
+    } else if(period==='Custom'){
+      from=customFrom?new Date(customFrom):new Date(now.getFullYear(),0,1);
+      to=customTo?new Date(customTo):new Date(now);
+      to.setHours(23,59,59,999);
+    } else {
+      return null; // All time
+    }
+    return {from:from, to:to};
+  }
+
+  // Filter entries/payments by date range and recompute stats
+  function applyFilter(period, customFrom, customTo){
+    var ctx=window.__obsCtx;
+    if(!ctx||!ctx.data)return;
+
+    var range=getRange(period, customFrom, customTo);
+    var data=ctx.data;
+
+    // Filter entries (for revenue/expenses)
+    var entries=data.entries||[];
+    var payments=data.payments||[];
+    var trips=data.trips||[];
+
+    var filteredEntries=range?entries.filter(function(e){
+      if(!e.date)return false;
+      var d=new Date(e.date);
+      return d>=range.from&&d<=range.to;
+    }):entries;
+
+    var filteredPayments=range?payments.filter(function(p){
+      if(!p.date)return false;
+      var d=new Date(p.date);
+      return d>=range.from&&d<=range.to;
+    }):payments;
+
+    var filteredTrips=range?trips.filter(function(t){
+      if(!t.date)return false;
+      var d=new Date(t.date);
+      return d>=range.from&&d<=range.to;
+    }):trips;
+
+    // Compute totals from filtered entries
+    var revenue=filteredEntries.reduce(function(s,e){return s+(parseFloat(e.revenue)||0);},0);
+    var expenses=filteredEntries.reduce(function(s,e){return s+(parseFloat(e.expenses)||0);},0);
+    var fuelCosts=filteredEntries.reduce(function(s,e){return s+(parseFloat(e.fuelCosts)||0);},0);
+    var totalExp=expenses+fuelCosts;
+    var profit=revenue-totalExp;
+    var margin=revenue>0?((profit/revenue)*100).toFixed(1):0;
+
+    // Payment totals
+    var paid=filteredPayments.filter(function(p){return p.status==='Paid';}).reduce(function(s,p){return s+(parseFloat(p.amount)||0);},0);
+    var pending=filteredPayments.filter(function(p){return p.status==='Pending';}).reduce(function(s,p){return s+(parseFloat(p.amount)||0);},0);
+    var overdue=filteredPayments.filter(function(p){return p.status==='Overdue';}).reduce(function(s,p){return s+(parseFloat(p.amount)||0);},0);
+
+    // Update the stat cards in the DOM
+    updateCard('TOTAL REVENUE', 'GHS '+revenue.toLocaleString());
+    updateCard('TOTAL EXPENSES', 'GHS '+totalExp.toLocaleString());
+    updateCard('NET PROFIT', 'GHS '+profit.toLocaleString());
+    updateCard('PROFIT MARGIN', margin+'%');
+
+    // Update payments section
+    updatePaymentRow('Paid', paid);
+    updatePaymentRow('Pending', pending);
+    updatePaymentRow('Overdue', overdue);
+
+    // Show active filter badge
+    showFilterBadge(period, range);
+  }
+
+  function updateCard(label, value){
+    var cards=document.querySelectorAll('.card, [class*="card"]');
+    cards.forEach(function(card){
+      var labelEl=null;
+      var divs=card.querySelectorAll('div');
+      for(var i=0;i<divs.length;i++){
+        var txt=(divs[i].textContent||'').trim();
+        if(txt===label&&divs[i].children.length===0){labelEl=divs[i];break;}
+      }
+      if(!labelEl)return;
+      // Find the value element (sibling or nearby)
+      var valueEl=null;
+      var parent=labelEl.parentNode;
+      if(parent){
+        var children=parent.querySelectorAll('div');
+        for(var j=0;j<children.length;j++){
+          var txt2=(children[j].textContent||'').trim();
+          if((txt2.indexOf('GHS')>-1||txt2.indexOf('%')>-1)&&children[j]!==labelEl&&children[j].children.length===0){
+            valueEl=children[j];break;
+          }
+        }
+      }
+      if(valueEl)valueEl.textContent=value;
+    });
+  }
+
+  function updatePaymentRow(status, amount){
+    var spans=document.querySelectorAll('span,div');
+    for(var i=0;i<spans.length;i++){
+      var el=spans[i];
+      if((el.textContent||'').trim()===status&&el.children.length===0){
+        // Find sibling with GHS
+        var parent=el.closest('[style]');
+        if(parent){
+          var amountEl=null;
+          var divs=parent.querySelectorAll('div,span');
+          for(var j=0;j<divs.length;j++){
+            var txt=(divs[j].textContent||'').trim();
+            if(txt.indexOf('GHS')>-1&&divs[j].children.length===0){amountEl=divs[j];break;}
+          }
+          if(amountEl)amountEl.textContent='GHS '+amount.toLocaleString();
+        }
+        break;
+      }
+    }
+  }
+
+  function showFilterBadge(period, range){
+    var old=document.getElementById('dash-filter-badge');
+    if(old)old.remove();
+    if(!range||period==='All Time')return;
+    var badge=document.createElement('div');
+    badge.id='dash-filter-badge';
+    var label=period;
+    if(period==='Custom'&&range){
+      label=range.from.toLocaleDateString()+' --- '+range.to.toLocaleDateString();
+    }
+    badge.style.cssText='display:inline-flex;align-items:center;gap:6px;background:rgba(200,168,110,0.15);border:1px solid rgba(200,168,110,0.4);color:#c8a86e;font-size:11px;font-weight:600;padding:3px 10px;border-radius:99px;margin-left:10px;';
+    badge.innerHTML='<span style="width:6px;height:6px;border-radius:50%;background:#c8a86e;display:inline-block;"></span>'+label;
+    var h1=document.querySelector('header h1');
+    if(h1)h1.parentNode.insertBefore(badge, h1.nextSibling);
+  }
+
+  // Replace the existing dropdown with enhanced version
+  function enhanceFilter(){
+    if(!isDashboard())return;
+    if(document.getElementById('dash-filter-sel'))return;
+
+    // Find the existing select
+    var selects=document.querySelectorAll('select');
+    var filterSel=null;
+    for(var i=0;i<selects.length;i++){
+      var opts=Array.from(selects[i].options).map(function(o){return o.text;});
+      if(opts.indexOf('This Week')>-1){filterSel=selects[i];break;}
+    }
+    if(!filterSel)return;
+
+    // Build new enhanced select
+    var newSel=document.createElement('select');
+    newSel.id='dash-filter-sel';
+    newSel.style.cssText=filterSel.style.cssText||'border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:13px;background:var(--surface);color:var(--text-primary);font-family:inherit;cursor:pointer;';
+
+    var periods=['This Week','Last Week','This Month','90 Days','This Year','Custom','All Time'];
+    periods.forEach(function(p){
+      var opt=document.createElement('option');
+      opt.value=p;opt.textContent=p;
+      newSel.appendChild(opt);
+    });
+
+    // Custom date inputs (hidden by default)
+    var customWrap=document.createElement('div');
+    customWrap.id='dash-custom-dates';
+    customWrap.style.cssText='display:none;align-items:center;gap:6px;margin-left:8px;';
+    customWrap.innerHTML=''
+      +'<span style="font-size:12px;color:var(--text-muted);">From</span>'
+      +'<input id="dash-from" type="date" style="padding:3px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text-primary);font-family:inherit;">'
+      +'<span style="font-size:12px;color:var(--text-muted);">To</span>'
+      +'<input id="dash-to" type="date" style="padding:3px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text-primary);font-family:inherit;">'
+      +'<button id="dash-apply" style="padding:3px 10px;background:#c8a86e;border:none;border-radius:6px;color:#1c1c1e;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Apply</button>';
+
+    newSel.onchange=function(){
+      var period=newSel.value;
+      customWrap.style.display=period==='Custom'?'flex':'none';
+      if(period!=='Custom'){
+        applyFilter(period, null, null);
+      }
+    };
+
+    // Apply custom range
+    setTimeout(function(){
+      var applyBtn=document.getElementById('dash-apply');
+      if(applyBtn){
+        applyBtn.onclick=function(){
+          var from=document.getElementById('dash-from').value;
+          var to=document.getElementById('dash-to').value;
+          applyFilter('Custom', from, to);
+        };
+      }
+    },500);
+
+    // Replace old select
+    filterSel.parentNode.insertBefore(newSel, filterSel);
+    filterSel.parentNode.insertBefore(customWrap, filterSel.nextSibling);
+    filterSel.remove();
+
+    // Apply default filter
+    applyFilter('This Week', null, null);
+  }
+
+  wait(function(){
+    var _t=null;
+    new MutationObserver(function(){
+      clearTimeout(_t);
+      _t=setTimeout(function(){
+        if(isDashboard()){enhanceFilter();}
+        else{var old=document.getElementById('dash-filter-badge');if(old)old.remove();}
+      },700);
+    }).observe(document.body,{childList:true,subtree:true});
+    if(isDashboard())enhanceFilter();
+  });
+})();
+</script>
