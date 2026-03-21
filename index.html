@@ -1339,14 +1339,19 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
 
     if(period==='This Week'){
       from=new Date(now);
-      from.setDate(now.getDate()-now.getDay());
+      // Monday start: getDay() returns 0=Sun,1=Mon...6=Sat
+      var day=now.getDay();
+      var diffToMon=day===0?6:day-1; // days since last Monday
+      from.setDate(now.getDate()-diffToMon);
       from.setHours(0,0,0,0);
     } else if(period==='Last Week'){
       from=new Date(now);
-      from.setDate(now.getDate()-now.getDay()-7);
+      var day2=now.getDay();
+      var diffToMon2=day2===0?6:day2-1;
+      from.setDate(now.getDate()-diffToMon2-7); // Monday of last week
       from.setHours(0,0,0,0);
       to=new Date(from);
-      to.setDate(from.getDate()+6);
+      to.setDate(from.getDate()+6); // Sunday of last week
       to.setHours(23,59,59,999);
     } else if(period==='This Month'){
       from=new Date(now.getFullYear(),now.getMonth(),1);
