@@ -1588,3 +1588,223 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
   });
 })();
 </script>
+
+<script>
+(function(){
+  'use strict';
+
+  function wait(cb){
+    var t=setInterval(function(){
+      var r=document.getElementById('root');
+      if(r&&r.children.length>0){clearInterval(t);setTimeout(cb,1500);}
+    },300);
+  }
+
+  function isDriversPage(){
+    var h=document.querySelector('header h1');
+    return h&&(h.textContent||'').indexOf('Driver')>-1;
+  }
+
+  function getData(){
+    var ctx=window.__obsCtx;
+    if(ctx&&ctx.data)return ctx.data;
+    return{};
+  }
+
+  // ------ Add "Performance Report" button to topbar ------
+  function addReportBtn(){
+    if(!isDriversPage())return;
+    if(document.getElementById('drv-perf-btn'))return;
+
+    var topbar=document.querySelector('header');
+    if(!topbar)return;
+    var actionArea=topbar.querySelector('div:last-child');
+    if(!actionArea)return;
+
+    var btn=document.createElement('button');
+    btn.id='drv-perf-btn';
+    btn.style.cssText='padding:7px 14px;border:1px solid #c8a86e;border-radius:8px;background:rgba(200,168,110,0.08);color:#c8a86e;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;display:flex;align-items:center;gap:6px;';
+    btn.innerHTML='&#128202; Performance Report';
+    btn.onclick=function(){openReport();};
+    actionArea.insertBefore(btn, actionArea.firstChild);
+  }
+
+  // ------ Build report data ------
+  function buildReport(){
+    var d=getData();
+    var drivers=d.drivers||[];
+    var trips=d.trips||[];
+    var payments=d.payments||[];
+
+    return drivers.map(function(driver){
+      // Trips assigned to this driver
+      var driverTrips=trips.filter(function(t){
+        return (t.driver&&t.driver===driver.name)||(t.truck&&t.truck===driver.truck);
+      });
+      var totalTrips=parseInt(driver.trips)||0;
+      var delivered=driverTrips.filter(function(t){return t.status==='Delivered';}).length;
+      var pending=driverTrips.filter(function(t){return t.status==='Pending'||t.status==='In Delivery';}).length;
+      var delayed=driverTrips.filter(function(t){return t.status==='Delayed';}).length;
+
+      // Wages from payments
+      var wages=payments.filter(function(p){
+        var cat=(p.category||'').toLowerCase();
+        var vendor=(p.vendor||'').toLowerCase();
+        var desc=(p.description||'').toLowerCase();
+        var dname=driver.name.toLowerCase();
+        return (cat.indexOf('driver')>-1||cat.indexOf('wage')>-1||cat.indexOf('salar')>-1)&&
+               (vendor.indexOf(dname.split(' ')[0])>-1||desc.indexOf(dname.split(' ')[0])>-1||vendor===''||desc==='');
+      }).reduce(function(s,p){return s+(parseFloat(p.amount)||0);},0);
+
+      var earnings=parseFloat(driver.earnings)||0;
+      var onTime=parseFloat(driver.onTimeRate)||100;
+      var onTimeColor=onTime>=90?'#10b981':onTime>=70?'#f59e0b':'#ef4444';
+      var rating=onTime>=90?'Excellent':onTime>=70?'Good':onTime>=50?'Average':'Needs Improvement';
+
+      return {
+        driver:driver,
+        totalTrips:totalTrips,
+        delivered:delivered,
+        pending:pending,
+        delayed:delayed,
+        earnings:earnings,
+        wages:wages,
+        onTime:onTime,
+        onTimeColor:onTimeColor,
+        rating:rating,
+      };
+    });
+  }
+
+  // ------ Open full screen report modal ------
+  function openReport(){
+    var ex=document.getElementById('perf-report');if(ex)ex.remove();
+    var data=buildReport();
+
+    var ov=document.createElement('div');
+    ov.id='perf-report';
+    ov.style.cssText='position:fixed;inset:0;background:var(--bg,#0f0f1a);z-index:9999;overflow-y:auto;';
+
+    // Header
+    var hdr=document.createElement('div');
+    hdr.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:20px 28px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:10;';
+    hdr.innerHTML='<div>'
+      +'<div style="font-size:20px;font-weight:700;color:var(--text-primary);">&#128202; Driver Performance Report</div>'
+      +'<div style="font-size:13px;color:var(--text-muted);margin-top:3px;">Overview of all driver metrics and performance</div>'
+      +'</div>'
+      +'<button id="cls-perf" style="padding:8px 16px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-primary);font-size:13px;cursor:pointer;font-family:inherit;">&#10005; Close</button>';
+
+    // Summary cards
+    var totalDrivers=data.length;
+    var activeDrivers=data.filter(function(d){return d.driver.status==='Active';}).length;
+    var totalTripsAll=data.reduce(function(s,d){return s+d.totalTrips;},0);
+    var avgOnTime=data.length?Math.round(data.reduce(function(s,d){return s+d.onTime;},0)/data.length):0;
+    var totalEarnings=data.reduce(function(s,d){return s+d.earnings;},0);
+
+    var summary=document.createElement('div');
+    summary.style.cssText='display:flex;gap:14px;padding:20px 28px;flex-wrap:wrap;border-bottom:1px solid var(--border);';
+    [
+      {l:'Total Drivers',v:totalDrivers,c:'#4f46e5'},
+      {l:'Active',v:activeDrivers,c:'#10b981'},
+      {l:'Total Trips',v:totalTripsAll,c:'#3b82f6'},
+      {l:'Avg On-Time',v:avgOnTime+'%',c:avgOnTime>=90?'#10b981':avgOnTime>=70?'#f59e0b':'#ef4444'},
+      {l:'Total Earnings',v:'GHS '+totalEarnings.toLocaleString(),c:'#10b981'},
+    ].forEach(function(s){
+      var c=document.createElement('div');
+      c.style.cssText='flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 18px;';
+      c.innerHTML='<div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);font-weight:500;margin-bottom:4px;">'+s.l+'</div>'
+        +'<div style="font-size:20px;font-weight:700;color:'+s.c+';">'+s.v+'</div>';
+      summary.appendChild(c);
+    });
+
+    // Driver cards grid
+    var grid=document.createElement('div');
+    grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:20px;padding:24px 28px;';
+
+    if(data.length===0){
+      grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:60px;color:var(--text-muted);font-size:15px;">No drivers added yet.</div>';
+    }
+
+    data.forEach(function(d){
+      var driver=d.driver;
+      var card=document.createElement('div');
+      card.style.cssText='background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;';
+
+      // Driver header
+      var dHdr=document.createElement('div');
+      dHdr.style.cssText='display:flex;align-items:center;gap:14px;margin-bottom:18px;padding-bottom:16px;border-bottom:1px solid var(--border);';
+      dHdr.innerHTML='<div style="width:50px;height:50px;border-radius:50%;background:'+(driver.color||'#6366f1')+';display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;font-weight:700;flex-shrink:0;">'+(driver.initials||'DR')+'</div>'
+        +'<div style="flex:1;">'
+        +'<div style="font-weight:700;font-size:16px;color:var(--text-primary);">'+driver.name+'</div>'
+        +'<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">'+(driver.handle||'')+(driver.truck?' &bull; '+driver.truck:'')+'</div>'
+        +'</div>'
+        +'<span style="padding:4px 10px;border-radius:99px;font-size:11px;font-weight:600;background:'+(driver.status==='Active'?'rgba(16,185,129,0.1)':driver.status==='On Leave'?'rgba(245,158,11,0.1)':'rgba(239,68,68,0.1)')+';color:'+(driver.status==='Active'?'#10b981':driver.status==='On Leave'?'#f59e0b':'#ef4444')+';">'+( driver.status||'Active')+'</span>';
+
+      // Stats grid
+      var stats=document.createElement('div');
+      stats.style.cssText='display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;';
+      [
+        {l:'Total Trips',v:d.totalTrips,c:'#3b82f6'},
+        {l:'On-Time Rate',v:d.onTime+'%',c:d.onTimeColor},
+        {l:'Earnings',v:'GHS '+(d.earnings).toLocaleString(),c:'#10b981'},
+      ].forEach(function(s){
+        var sc=document.createElement('div');
+        sc.style.cssText='background:var(--surface2);border-radius:8px;padding:10px 12px;text-align:center;';
+        sc.innerHTML='<div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px;">'+s.l+'</div>'
+          +'<div style="font-size:16px;font-weight:700;color:'+s.c+';">'+s.v+'</div>';
+        stats.appendChild(sc);
+      });
+
+      // On-time progress bar
+      var barWrap=document.createElement('div');
+      barWrap.style.cssText='margin-bottom:14px;';
+      barWrap.innerHTML='<div style="display:flex;justify-content:space-between;margin-bottom:5px;">'
+        +'<span style="font-size:11px;color:var(--text-muted);">On-Time Performance</span>'
+        +'<span style="font-size:11px;font-weight:600;color:'+d.onTimeColor+';">'+d.rating+'</span>'
+        +'</div>'
+        +'<div style="height:8px;background:var(--surface3);border-radius:99px;overflow:hidden;">'
+        +'<div style="height:100%;width:'+d.onTime+'%;background:'+d.onTimeColor+';border-radius:99px;transition:width 0.6s ease;"></div>'
+        +'</div>';
+
+      // Info row
+      var info=document.createElement('div');
+      info.style.cssText='display:flex;flex-wrap:wrap;gap:8px;';
+      [
+        driver.phone?{icon:'&#128222;',v:driver.phone}:null,
+        driver.license?{icon:'&#128203;',v:'Lic: '+driver.license}:null,
+        driver.carNumber?{icon:'&#128663;',v:driver.carNumber}:null,
+        driver.joined?{icon:'&#128197;',v:'Since '+driver.joined}:null,
+      ].filter(Boolean).forEach(function(item){
+        var chip=document.createElement('span');
+        chip.style.cssText='display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--text-secondary);background:var(--surface2);padding:3px 8px;border-radius:6px;';
+        chip.innerHTML=item.icon+' '+item.v;
+        info.appendChild(chip);
+      });
+
+      card.appendChild(dHdr);
+      card.appendChild(stats);
+      card.appendChild(barWrap);
+      card.appendChild(info);
+      grid.appendChild(card);
+    });
+
+    ov.appendChild(hdr);
+    ov.appendChild(summary);
+    ov.appendChild(grid);
+    document.body.appendChild(ov);
+    document.getElementById('cls-perf').onclick=function(){ov.remove();};
+  }
+
+  wait(function(){
+    var _t=null;
+    new MutationObserver(function(){
+      clearTimeout(_t);
+      _t=setTimeout(function(){
+        if(isDriversPage())addReportBtn();
+        else{var b=document.getElementById('drv-perf-btn');if(b)b.remove();}
+      },600);
+    }).observe(document.body,{childList:true,subtree:true});
+    if(isDriversPage())addReportBtn();
+  });
+})();
+</script>
