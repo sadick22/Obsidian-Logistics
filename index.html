@@ -565,8 +565,7 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
   }
 
   function getDriver(name){
-    // Try fiber first
-    var ctx=getCtx();
+    var ctx=window.__obsCtx;
     var drivers=(ctx&&ctx.data&&ctx.data.drivers)||[];
     for(var i=0;i<drivers.length;i++){
       if((drivers[i].name||'')==name)return drivers[i];
@@ -619,8 +618,8 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
   }
 
   function updateDriver(driver){
-    var ctx=getCtxDeep();
-    if(!ctx)return;
+    var ctx=window.__obsCtx;
+    if(!ctx||!ctx.update){console.warn('__obsCtx not ready');return;}
     var all=(ctx.data.drivers||[]).map(function(d){
       return String(d.id)===String(driver.id)?driver:d;
     });
@@ -853,41 +852,8 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
     saveBtn.textContent='Save All Documents';
     saveBtn.onclick=function(){
       // Try all fiber entry points to find context
-      var ctx=null;
-      // Method 1: from root
-      try{
-        var root=document.getElementById('root');
-        var keys=Object.keys(root);
-        var fk='';for(var i=0;i<keys.length;i++){if(keys[i].indexOf('__reactFiber')===0){fk=keys[i];break;}}
-        if(fk){
-          function walk(n,d){
-            if(!n||d>800)return null;
-            try{var v=n.memoizedProps&&n.memoizedProps.value;if(v&&v.data&&v.update&&Array.isArray(v.data.drivers))return v;}catch(e){}
-            var r=null;try{if(n.child)r=walk(n.child,d+1);}catch(e){}
-            if(!r)try{if(n.sibling)r=walk(n.sibling,d+1);}catch(e){}
-            return r;
-          }
-          ctx=walk(root[fk],0);
-        }
-      }catch(e){}
-      // Method 2: walk UP from a table cell
-      if(!ctx){
-        try{
-          var cells=document.querySelectorAll('table td');
-          for(var ci=0;ci<cells.length&&!ctx;ci++){
-            var ckeys=Object.keys(cells[ci]);
-            var cfk='';for(var cj=0;cj<ckeys.length;cj++){if(ckeys[cj].indexOf('__reactFiber')===0){cfk=ckeys[cj];break;}}
-            if(!cfk)continue;
-            function walkUp(n,d){
-              if(!n||d>50)return null;
-              try{var v=n.memoizedProps&&n.memoizedProps.value;if(v&&v.data&&v.update&&Array.isArray(v.data.drivers))return v;}catch(e){}
-              return n.return?walkUp(n.return,d+1):null;
-            }
-            ctx=walkUp(cells[ci][cfk],0);
-          }
-        }catch(e){}
-      }
-      if(!ctx){
+      var ctx=window.__obsCtx;
+      if(!ctx||!ctx.update){
         saveBtn.textContent='Could not connect - try Edit & Update instead';
         saveBtn.style.background='#ef4444';
         return;
@@ -1070,27 +1036,36 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
     saveBtn.style.cssText='flex:1;padding:11px;background:#c8a86e;border:none;border-radius:10px;color:#1c1c1e;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit;';
     saveBtn.textContent='Save Changes';
     saveBtn.onclick=function(){
-      var ctx=getCtx();
-      if(!ctx){
-        // No firebase ctx - just show success (role stored locally)
-        saveBtn.textContent='Saved!';
-        saveBtn.style.background='#10b981';
-        setTimeout(function(){ov.remove();},800);
+      saveBtn.textContent='Saving...';
+      saveBtn.disabled=true;
+      var ctx=window.__obsCtx;
+      if(!ctx||!ctx.update){
+        saveBtn.textContent='Error - refresh and try again';
+        saveBtn.style.background='#ef4444';
+        saveBtn.disabled=false;
         return;
       }
-      var admins=(ctx.data.admins||[]).map(function(a){
-        if((a.name||'')==adminName){
+      var currentAdmins=ctx.data.admins||[];
+      var found=false;
+      var updated=currentAdmins.map(function(a){
+        if((a.name||'')==adminName||(a.email&&a.email==adminName)){
+          found=true;
           var copy={};for(var k in a)copy[k]=a[k];
           copy.role=roleSelect.value;
           return copy;
         }
         return a;
       });
-      ctx.update({admins:admins});
+      if(!found){
+        // Admin not in array - might be the current user, add them
+        updated=currentAdmins.concat([{name:adminName,role:roleSelect.value,id:Date.now()}]);
+      }
+      ctx.update({admins:updated});
       saveBtn.textContent='Saved!';
       saveBtn.style.background='#10b981';
       saveBtn.style.color='#fff';
-      setTimeout(function(){ov.remove();location.reload();},900);
+      saveBtn.disabled=false;
+      setTimeout(function(){ov.remove();},1000);
     };
 
     var delBtn=document.createElement('button');
@@ -1099,13 +1074,19 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
     delBtn.onclick=function(){
       if(isMe){alert('You cannot delete your own account.');return;}
       if(!confirm('Remove '+adminName+' from admins?'))return;
-      var ctx=getCtx();
-      if(ctx){
-        var admins=(ctx.data.admins||[]).filter(function(a){return(a.name||'')!==adminName;});
-        ctx.update({admins:admins});
-      }
+      var ctx=window.__obsCtx;
+      if(!ctx||!ctx.update){alert('Could not connect. Please refresh and try again.');return;}
+      var admins=(ctx.data.admins||[]).filter(function(a){
+        return(a.name||'')!==adminName&&(a.email||'')!==adminName;
+      });
+      ctx.update({admins:admins});
       ov.remove();
-      setTimeout(function(){location.reload();},400);
+      // Show toast
+      var toast=document.createElement('div');
+      toast.style.cssText='position:fixed;bottom:24px;right:24px;background:#10b981;color:#fff;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:600;z-index:99999;';
+      toast.textContent='Admin removed successfully';
+      document.body.appendChild(toast);
+      setTimeout(function(){toast.remove();},2500);
     };
 
     btnRow.appendChild(saveBtn);
