@@ -1368,6 +1368,20 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
     return {from:from, to:to};
   }
 
+  // Parse DD/MM/YYYY or YYYY-MM-DD or any date string
+  function parseDate(str){
+    if(!str)return null;
+    // DD/MM/YYYY (en-GB format used by the app)
+    var gbMatch=str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if(gbMatch)return new Date(parseInt(gbMatch[3]),parseInt(gbMatch[2])-1,parseInt(gbMatch[1]));
+    // YYYY-MM-DD
+    var isoMatch=str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(isoMatch)return new Date(parseInt(isoMatch[1]),parseInt(isoMatch[2])-1,parseInt(isoMatch[3]));
+    // Fallback
+    var d=new Date(str);
+    return isNaN(d.getTime())?null:d;
+  }
+
   // Filter entries/payments by date range and recompute stats
   function applyFilter(period, customFrom, customTo){
     var ctx=window.__obsCtx;
@@ -1383,20 +1397,20 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
 
     var filteredEntries=range?entries.filter(function(e){
       if(!e.date)return false;
-      var d=new Date(e.date);
-      return d>=range.from&&d<=range.to;
+      var d=parseDate(e.date);
+      return d&&d>=range.from&&d<=range.to;
     }):entries;
 
     var filteredPayments=range?payments.filter(function(p){
       if(!p.date)return false;
-      var d=new Date(p.date);
-      return d>=range.from&&d<=range.to;
+      var d=parseDate(p.date);
+      return d&&d>=range.from&&d<=range.to;
     }):payments;
 
     var filteredTrips=range?trips.filter(function(t){
       if(!t.date)return false;
-      var d=new Date(t.date);
-      return d>=range.from&&d<=range.to;
+      var d=parseDate(t.date);
+      return d&&d>=range.from&&d<=range.to;
     }):trips;
 
     // Compute totals from filtered entries
