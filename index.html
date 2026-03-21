@@ -974,7 +974,13 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
       gear.onmouseleave=function(){gear.style.background='transparent';};
       gear.onclick=function(e){
         e.stopPropagation();
-        openAdminModal(adminName);
+        var ctx=window.__obsCtx;
+        var admins=(ctx&&ctx.data&&ctx.data.admins)||[];
+        var adminObj=null;
+        for(var ai=0;ai<admins.length;ai++){
+          if((admins[ai].name||'')==adminName){adminObj=admins[ai];break;}
+        }
+        openAdminModal(adminName, adminObj);
       };
 
       // Make card relative positioned
@@ -983,7 +989,7 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
     });
   }
 
-  function openAdminModal(adminName){
+  function openAdminModal(adminName, adminObj){
     var ex=document.getElementById('adm-modal');if(ex)ex.remove();
     var me=getMyProfile();
     var isMe=(me.name&&me.name===adminName)||(me.email&&adminName&&me.email.indexOf(adminName)>-1);
@@ -1046,20 +1052,16 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
         return;
       }
       var currentAdmins=ctx.data.admins||[];
-      var found=false;
       var updated=currentAdmins.map(function(a){
-        if((a.name||'')==adminName||(a.email&&a.email==adminName)){
-          found=true;
+        // Match by id first, then fall back to name
+        var isMatch=adminObj&&adminObj.id?String(a.id)===String(adminObj.id):(a.name||'')==adminName;
+        if(isMatch){
           var copy={};for(var k in a)copy[k]=a[k];
           copy.role=roleSelect.value;
           return copy;
         }
         return a;
       });
-      if(!found){
-        // Admin not in array - might be the current user, add them
-        updated=currentAdmins.concat([{name:adminName,role:roleSelect.value,id:Date.now()}]);
-      }
       ctx.update({admins:updated});
       saveBtn.textContent='Saved!';
       saveBtn.style.background='#10b981';
@@ -1077,7 +1079,9 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
       var ctx=window.__obsCtx;
       if(!ctx||!ctx.update){alert('Could not connect. Please refresh and try again.');return;}
       var admins=(ctx.data.admins||[]).filter(function(a){
-        return(a.name||'')!==adminName&&(a.email||'')!==adminName;
+        // Match by id first, then fall back to name
+        if(adminObj&&adminObj.id)return String(a.id)!==String(adminObj.id);
+        return(a.name||'')!==adminName;
       });
       ctx.update({admins:admins});
       ov.remove();
