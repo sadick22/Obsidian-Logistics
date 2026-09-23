@@ -357,7 +357,7 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
 
     var wrap=document.createElement('div');
     wrap.id='reports-addon';
-    wrap.style.cssText='display:flex;align-items:center;gap:6px;margin-right:8px;flex-wrap:wrap;';
+    wrap.style.cssText='display:flex;align-items:center;gap:6px;margin-right:8px;flex-wrap:nowrap;';
 
     // Dropdown filter (same logic as Dashboard)
     var sel=document.createElement('select');
@@ -410,40 +410,10 @@ function SO({title:e}){return(0,I.jsxs)("div",{className:"page-fade",style:{padd
       applyReportsFilter(from,to);
     };
 
-    var exportBtn=document.createElement('button');
-    exportBtn.style.cssText='padding:6px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap;';
-    exportBtn.innerHTML='&#11015; Export CSV';
-    exportBtn.addEventListener('click',function(){
-      try{
-        var ctx=window.__obsCtx;
-        if(!ctx||!ctx.data){alert('No data to export');return;}
-        var from=fromInput.value?new Date(fromInput.value):null;
-        var to=toInput.value?new Date(toInput.value):null;
-        var entries=ctx.data.entries||[];
-        if(from||to){
-          entries=entries.filter(function(e){
-            var d=parseEntryDate(e.date);if(!d)return true;
-            if(from&&d<from)return false;
-            if(to){var toEnd=new Date(to);toEnd.setHours(23,59,59,999);if(d>toEnd)return false;}
-            return true;
-          });
-        }
-        var lines=['Date,Country,Revenue,Expenses,Fuel,Tonnes,Trips,Profit,Note'];
-        entries.forEach(function(e){
-          var profit=(parseFloat(e.revenue)||0)-(parseFloat(e.expenses)||0)-(parseFloat(e.fuelCosts)||0);
-          lines.push([e.date,e.country,e.revenue,e.expenses,e.fuelCosts,e.tonnes||0,e.trips,profit.toFixed(2),(e.note||'').replace(/,/g,';')].join(','));
-        });
-        var blob=new Blob([lines.join('\n')],{type:'text/csv'});
-        var a=document.createElement('a');
-        a.href=URL.createObjectURL(blob);
-        a.download='obsidian_report_'+new Date().toISOString().slice(0,10)+'.csv';
-        document.body.appendChild(a);a.click();document.body.removeChild(a);
-      }catch(err){alert('Export failed: '+err.message);}
-    });
+
 
     wrap.appendChild(sel);
     wrap.appendChild(customWrap);
-    wrap.appendChild(exportBtn);
 
     var actionArea=header.querySelector('div:last-child');
     if(actionArea) actionArea.insertBefore(wrap,actionArea.firstChild);
